@@ -6,217 +6,159 @@
     <title>EvoDestiny</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             min-height: 100vh;
             background: linear-gradient(165deg, #fdf6e3 0%, #fef9ed 40%, #ffffff 100%);
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-family: 'Inter', sans-serif;
-            overflow: hidden;
         }
 
-        .container {
-            text-align: center;
-            padding: 2rem;
-            max-width: 720px;
-        }
-
-        .greeting {
-            font-family: 'Playfair Display', serif;
-            font-size: clamp(2.8rem, 6vw, 4.5rem);
-            font-weight: 700;
-            color: #2c2c2c;
-            margin-bottom: 0.3em;
-            opacity: 0;
-            animation: fadeSlideUp 2.6s ease forwards 0.3s;
-        }
-
-        .name {
-            font-family: 'Playfair Display', serif;
-            font-style: italic;
-            font-size: clamp(3.2rem, 7vw, 5.5rem);
-            font-weight: 400;
-            background: linear-gradient(135deg, #c9a227, #d4a843, #8b6914);
-            background-size: 200% 200%;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            animation: fadeSlideUp 2.6s ease forwards 0.9s, shimmer 4s ease-in-out infinite;
-            opacity: 0;
-            margin-bottom: 1.5em;
-        }
-
-        .divider {
-            width: 60px;
-            height: 1.5px;
-            background: #c9a227;
-            margin: 0 auto 2em;
-            opacity: 0;
-            animation: expandWidth 0.8s ease forwards 1s;
-        }
-
-        .tagline {
-            font-size: clamp(1rem, 2.2vw, 1.25rem);
-            font-weight: 300;
-            color: #666;
-            letter-spacing: 0.05em;
-            line-height: 1.8;
-            min-height: 3.6em;
-            opacity: 0;
-            animation: fadeIn 0.6s ease forwards 1.2s;
-        }
-
-        .typing-cursor {
-            display: inline-block;
-            width: 2px;
-            height: 1.1em;
-            background: #c9a227;
-            margin-left: 2px;
-            vertical-align: text-bottom;
-            animation: blink 0.8s step-end infinite;
-        }
-
-        .links {
-            margin-top: 3em;
-            display: flex;
-            gap: 2em;
-            justify-content: center;
-            flex-wrap: wrap;
-            opacity: 0;
-            animation: fadeSlideUp 0.8s ease forwards 3.5s;
-        }
-
-        .links a {
-            color: #999;
-            text-decoration: none;
-            font-size: 0.85rem;
-            font-weight: 300;
-            letter-spacing: 0.15em;
-            text-transform: uppercase;
-            padding: 0.5em 0;
-            position: relative;
-            transition: color 0.3s ease;
-        }
-
-        .links a::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 0;
-            height: 1px;
-            background: #c9a227;
-            transition: width 0.3s ease;
-        }
-
-        .links a:hover {
-            color: #2c2c2c;
-        }
-
-        .links a:hover::after {
-            width: 100%;
-        }
-
-        /* Floating particles */
-        .particles {
+        canvas#bgCanvas {
             position: fixed;
-            top: 0;
-            left: 0;
+            inset: 0;
             width: 100%;
             height: 100%;
             pointer-events: none;
             z-index: 0;
         }
 
-        .particle {
-            position: absolute;
-            width: 4px;
-            height: 4px;
-            border-radius: 50%;
-            background: rgba(201, 162, 39, 0.15);
-            animation: float linear infinite;
-        }
-
         .container {
             position: relative;
             z-index: 1;
+            text-align: center;
+            padding: 2rem;
+            max-width: 760px;
         }
 
-        @keyframes fadeSlideUp {
-            from {
-                opacity: 0;
-                transform: translateY(25px);
-            }
-            to {
+        .greeting {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(2.6rem, 5.5vw, 4.2rem);
+            font-weight: 700;
+            color: #2c2c2c;
+            margin-bottom: 0.15em;
+            user-select: none;
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        .name {
+            font-family: 'Playfair Display', serif;
+            font-style: italic;
+            font-size: clamp(3rem, 7vw, 5.5rem);
+            font-weight: 400;
+            background: linear-gradient(135deg, #c9a227, #d4a843, #8b6914);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: shimmer 5s ease-in-out infinite paused;
+            margin-bottom: 1em;
+            user-select: none;
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        .divider {
+            width: 0;
+            height: 1.5px;
+            background: linear-gradient(90deg, transparent, #c9a227, transparent);
+            margin: 0 auto 1.8em;
+            opacity: 0;
+        }
+
+        .tagline {
+            font-size: clamp(1rem, 2.2vw, 1.2rem);
+            font-weight: 300;
+            color: #666;
+            letter-spacing: 0.04em;
+            line-height: 1.8;
+            min-height: 2em;
+            user-select: none;
+            opacity: 0;
+        }
+
+        .typing-cursor {
+            display: inline-block;
+            width: 2.5px;
+            height: 1.15em;
+            margin-left: 3px;
+            vertical-align: text-bottom;
+            border-radius: 1px;
+            background: #c9a227;
+            box-shadow:
+                0 0 4px rgba(201, 162, 39, 0.6),
+                0 0 12px rgba(201, 162, 39, 0.3),
+                0 0 24px rgba(201, 162, 39, 0.1);
+            animation: cursorPulse 1s ease-in-out infinite;
+        }
+
+        @keyframes cursorPulse {
+            0%, 100% {
                 opacity: 1;
-                transform: translateY(0);
+                box-shadow:
+                    0 0 4px rgba(201, 162, 39, 0.6),
+                    0 0 12px rgba(201, 162, 39, 0.3),
+                    0 0 24px rgba(201, 162, 39, 0.1);
+            }
+            50% {
+                opacity: 0;
+                box-shadow:
+                    0 0 2px rgba(201, 162, 39, 0.2),
+                    0 0 6px rgba(201, 162, 39, 0.1);
             }
         }
 
-        @keyframes fadeIn {
-            to { opacity: 1; }
+        .links {
+            margin-top: 2.5em;
+            display: flex;
+            gap: 2.2em;
+            justify-content: center;
+            flex-wrap: wrap;
+            opacity: 0;
+            transform: translateY(20px);
         }
+
+        .links a {
+            color: #aaa;
+            text-decoration: none;
+            font-size: 0.82rem;
+            font-weight: 400;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            padding: 0.5em 0;
+            position: relative;
+            transition: color 0.35s ease;
+        }
+
+        .links a::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            width: 0;
+            height: 1px;
+            background: #c9a227;
+            transition: width 0.35s ease, left 0.35s ease;
+        }
+
+        .links a:hover { color: #2c2c2c; }
+        .links a:hover::after { width: 100%; left: 0; }
 
         @keyframes shimmer {
             0%, 100% { background-position: 0% 50%; }
             50% { background-position: 100% 50%; }
         }
-
-        @keyframes expandWidth {
-            from {
-                opacity: 0;
-                width: 0;
-            }
-            to {
-                opacity: 1;
-                width: 60px;
-            }
-        }
-
-        @keyframes blink {
-            50% { opacity: 0; }
-        }
-
-        @keyframes float {
-            0% {
-                transform: translateY(100vh) scale(0);
-                opacity: 0;
-            }
-            10% {
-                opacity: 1;
-            }
-            90% {
-                opacity: 1;
-            }
-            100% {
-                transform: translateY(-10vh) scale(1);
-                opacity: 0;
-            }
-        }
-
-        #mouseCanvas {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 10;
-        }
     </style>
 </head>
 <body>
-    <canvas id="mouseCanvas"></canvas>
-    <div class="particles" id="particles"></div>
+    <canvas id="bgCanvas"></canvas>
 
     <div class="container">
         <div class="greeting">Hello, I'm</div>
@@ -234,82 +176,223 @@
     </div>
 
     <script>
+    (() => {
+        // ── Canvas particle system ──
+        const cvs = document.getElementById('bgCanvas');
+        const ctx = cvs.getContext('2d');
+        let W, H;
+        const mouse = { x: -500, y: -500 };
+        const MOUSE_RADIUS = 150;
+
+        function resize() {
+            W = cvs.width = window.innerWidth;
+            H = cvs.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        document.addEventListener('mousemove', e => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+        });
+
+        const symbols = ['{', '}', '<', '/>', '()', '=>', '[]', ';', '#', '&&', '||', '::',  '**', '>>'];
+
+        class Particle {
+            constructor() { this.reset(true); }
+
+            reset(init) {
+                this.x = Math.random() * W;
+                this.y = init ? Math.random() * H : H + 20;
+                this.depth = 0.3 + Math.random() * 0.7;
+                this.size = 8 + Math.random() * 6;
+                this.baseAlpha = 0.04 + Math.random() * 0.08;
+                this.alpha = this.baseAlpha;
+                this.vx = (Math.random() - 0.5) * 0.15;
+                this.vy = -(0.12 + Math.random() * 0.2) * this.depth;
+                this.symbol = symbols[Math.floor(Math.random() * symbols.length)];
+                this.rotation = Math.random() * Math.PI * 2;
+                this.rotSpeed = (Math.random() - 0.5) * 0.003;
+                this.ox = this.x;
+                this.oy = this.y;
+            }
+
+            update() {
+                this.rotation += this.rotSpeed;
+
+                const dx = this.x - mouse.x;
+                const dy = this.y - mouse.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < MOUSE_RADIUS) {
+                    const force = (1 - dist / MOUSE_RADIUS) * 0.8;
+                    this.x += dx / dist * force;
+                    this.y += dy / dist * force;
+                    this.alpha = this.baseAlpha + (0.25 - this.baseAlpha) * (1 - dist / MOUSE_RADIUS);
+                } else {
+                    this.alpha += (this.baseAlpha - this.alpha) * 0.03;
+                }
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                if (this.y < -30 || this.x < -30 || this.x > W + 30) {
+                    this.reset(false);
+                }
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                ctx.font = `${this.size * this.depth}px 'Inter', monospace`;
+                ctx.fillStyle = `rgba(185, 148, 30, ${this.alpha})`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.symbol, 0, 0);
+                ctx.restore();
+            }
+        }
+
+        const particles = Array.from({ length: 55 }, () => new Particle());
+
+        function drawConnections() {
+            const maxDist = 120;
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const a = particles[i], b = particles[j];
+                    const dx = a.x - b.x;
+                    const dy = a.y - b.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < maxDist) {
+                        const opacity = (1 - dist / maxDist) * Math.min(a.alpha, b.alpha) * 2.5;
+                        ctx.beginPath();
+                        ctx.moveTo(a.x, a.y);
+                        ctx.lineTo(b.x, b.y);
+                        ctx.strokeStyle = `rgba(201, 162, 39, ${opacity})`;
+                        ctx.lineWidth = 0.4;
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        function renderLoop() {
+            ctx.clearRect(0, 0, W, H);
+            particles.forEach(p => { p.update(); p.draw(); });
+            drawConnections();
+            requestAnimationFrame(renderLoop);
+        }
+        renderLoop();
+
+        // ── Entrance animations (sequential) ──
+        const ease = 'cubic-bezier(0.23, 1, 0.32, 1)';
+
+        function animateIn(el, duration, delay) {
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    el.style.transition = `opacity ${duration}ms ${ease}, transform ${duration}ms ${ease}`;
+                    el.style.opacity = '1';
+                    el.style.transform = 'translateY(0)';
+                    setTimeout(resolve, duration);
+                }, delay);
+            });
+        }
+
+        async function runEntrance() {
+            const greeting = document.querySelector('.greeting');
+            const name = document.querySelector('.name');
+            const divider = document.querySelector('.divider');
+            const tagline = document.querySelector('.tagline');
+            const links = document.querySelector('.links');
+
+            await animateIn(greeting, 1400, 300);
+            await animateIn(name, 1600, 100);
+            name.style.animationPlayState = 'running';
+
+            await new Promise(resolve => {
+                setTimeout(() => {
+                    divider.style.transition = `width 800ms ${ease}, opacity 600ms ease`;
+                    divider.style.opacity = '1';
+                    divider.style.width = '120px';
+                    setTimeout(resolve, 800);
+                }, 200);
+            });
+
+            await new Promise(resolve => {
+                setTimeout(() => {
+                    tagline.style.transition = `opacity 700ms ease`;
+                    tagline.style.opacity = '1';
+                    setTimeout(resolve, 700);
+                }, 100);
+            });
+
+            startTyping();
+
+            setTimeout(() => {
+                links.style.transition = `opacity 900ms ${ease}, transform 900ms ${ease}`;
+                links.style.opacity = '1';
+                links.style.transform = 'translateY(0)';
+            }, 600);
+        }
+
+        // ── Typing effect ──
         const phrases = [
             "Developer & Creator.",
             "Crafting elegant digital experiences.",
             "Passionate about clean code & design."
         ];
-
         const typedEl = document.getElementById('typed-text');
-        let phraseIndex = 0;
-        let charIndex = 0;
-        let isDeleting = false;
-        let typingSpeed = 70;
+        let phraseIdx = 0, charIdx = 0, deleting = false;
 
-        function type() {
-            const current = phrases[phraseIndex];
+        function typeStep() {
+            const current = phrases[phraseIdx];
+            let delay;
 
-            if (!isDeleting) {
-                typedEl.textContent = current.substring(0, charIndex + 1);
-                charIndex++;
-                if (charIndex === current.length) {
-                    isDeleting = true;
-                    typingSpeed = 2000;
+            if (!deleting) {
+                charIdx++;
+                typedEl.textContent = current.substring(0, charIdx);
+                if (charIdx === current.length) {
+                    deleting = true;
+                    delay = 2200;
                 } else {
-                    typingSpeed = 70 + Math.random() * 40;
+                    delay = 65 + Math.random() * 45;
                 }
             } else {
-                typedEl.textContent = current.substring(0, charIndex - 1);
-                charIndex--;
-                if (charIndex === 0) {
-                    isDeleting = false;
-                    phraseIndex = (phraseIndex + 1) % phrases.length;
-                    typingSpeed = 400;
+                charIdx--;
+                typedEl.textContent = current.substring(0, charIdx);
+                if (charIdx === 0) {
+                    deleting = false;
+                    phraseIdx = (phraseIdx + 1) % phrases.length;
+                    delay = 500;
                 } else {
-                    typingSpeed = 35;
+                    delay = 30;
                 }
             }
-
-            setTimeout(type, typingSpeed);
+            setTimeout(typeStep, delay);
         }
 
-        setTimeout(type, 1800);
-
-        const container = document.getElementById('particles');
-        function createParticle() {
-            const particle = document.createElement('div');
-            particle.classList.add('particle');
-            const size = Math.random() * 4 + 2;
-            particle.style.width = size + 'px';
-            particle.style.height = size + 'px';
-            particle.style.left = Math.random() * 100 + '%';
-            const duration = Math.random() * 12 + 10;
-            particle.style.animationDuration = duration + 's';
-            particle.style.animationDelay = Math.random() * 5 + 's';
-            container.appendChild(particle);
-
-            setTimeout(() => particle.remove(), (duration + 5) * 1000);
+        function startTyping() {
+            setTimeout(typeStep, 400);
         }
 
-        for (let i = 0; i < 15; i++) {
-            setTimeout(createParticle, i * 400);
-        }
-        setInterval(createParticle, 1500);
+        runEntrance();
 
-        const cvs = document.getElementById('mouseCanvas');
-        const ctx = cvs.getContext('2d');
-        let mouse = { x: -200, y: -200, moving: false };
-        let idleTimer = null;
+        // ── Mouse interactive particles (scatter on move, orbit on idle) ──
+        const mCanvas = document.createElement('canvas');
+        mCanvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2';
+        document.body.appendChild(mCanvas);
+        const mCtx = mCanvas.getContext('2d');
+        let mW, mH;
+        function mResize() { mW = mCanvas.width = window.innerWidth; mH = mCanvas.height = window.innerHeight; }
+        mResize();
+        window.addEventListener('resize', mResize);
+
+        const mMouse = { x: -200, y: -200, moving: false };
+        let mIdleTimer = null;
         const dots = [];
-        const MAX_DOTS = 18;
-        const LINE_DIST = 90;
-
-        function resizeCanvas() {
-            cvs.width = window.innerWidth;
-            cvs.height = window.innerHeight;
-        }
-        resizeCanvas();
-        window.addEventListener('resize', resizeCanvas);
+        const M_MAX = 18;
+        const M_LINE = 90;
+        let lastSpawnX = 0, lastSpawnY = 0;
 
         class Dot {
             constructor(x, y) {
@@ -323,97 +406,83 @@
                 this.alpha = 1;
                 this.life = 1;
                 this.decay = 0.006 + Math.random() * 0.004;
-                this.gathering = false;
                 this.orbitAngle = angle;
                 this.orbitRadius = 25 + Math.random() * 45;
                 this.orbitSpeed = (0.003 + Math.random() * 0.006) * (Math.random() > 0.5 ? 1 : -1);
             }
-
             update() {
-                if (!mouse.moving) {
+                if (!mMouse.moving) {
                     this.orbitAngle += this.orbitSpeed;
-                    const targetX = mouse.x + Math.cos(this.orbitAngle) * this.orbitRadius;
-                    const targetY = mouse.y + Math.sin(this.orbitAngle) * this.orbitRadius;
-                    const dx = targetX - this.x;
-                    const dy = targetY - this.y;
-                    this.vx += dx * 0.0015;
-                    this.vy += dy * 0.0015;
+                    const tx = mMouse.x + Math.cos(this.orbitAngle) * this.orbitRadius;
+                    const ty = mMouse.y + Math.sin(this.orbitAngle) * this.orbitRadius;
+                    this.vx += (tx - this.x) * 0.0015;
+                    this.vy += (ty - this.y) * 0.0015;
                     this.vx *= 0.97;
                     this.vy *= 0.97;
-                    this.gathering = true;
                     this.life -= this.decay * 0.3;
                 } else {
                     this.vx *= 0.995;
                     this.vy *= 0.995;
                     this.life -= this.decay;
-                    this.gathering = false;
                 }
-
                 this.x += this.vx;
                 this.y += this.vy;
                 this.alpha = Math.max(0, this.life);
             }
-
             draw() {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(201, 162, 39, ${this.alpha * 0.7})`;
-                ctx.fill();
+                mCtx.beginPath();
+                mCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                mCtx.fillStyle = `rgba(201, 162, 39, ${this.alpha * 0.7})`;
+                mCtx.fill();
             }
         }
 
-        function drawLines() {
+        function mDrawLines() {
             for (let i = 0; i < dots.length; i++) {
                 for (let j = i + 1; j < dots.length; j++) {
                     const dx = dots[i].x - dots[j].x;
                     const dy = dots[i].y - dots[j].y;
                     const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < LINE_DIST) {
-                        const opacity = (1 - dist / LINE_DIST) * Math.min(dots[i].alpha, dots[j].alpha) * 0.4;
-                        ctx.beginPath();
-                        ctx.moveTo(dots[i].x, dots[i].y);
-                        ctx.lineTo(dots[j].x, dots[j].y);
-                        ctx.strokeStyle = `rgba(201, 162, 39, ${opacity})`;
-                        ctx.lineWidth = 0.6;
-                        ctx.stroke();
+                    if (dist < M_LINE) {
+                        const op = (1 - dist / M_LINE) * Math.min(dots[i].alpha, dots[j].alpha) * 0.4;
+                        mCtx.beginPath();
+                        mCtx.moveTo(dots[i].x, dots[i].y);
+                        mCtx.lineTo(dots[j].x, dots[j].y);
+                        mCtx.strokeStyle = `rgba(201, 162, 39, ${op})`;
+                        mCtx.lineWidth = 0.6;
+                        mCtx.stroke();
                     }
                 }
             }
         }
 
-        function animate() {
-            ctx.clearRect(0, 0, cvs.width, cvs.height);
+        function mAnimate() {
+            mCtx.clearRect(0, 0, mW, mH);
             for (let i = dots.length - 1; i >= 0; i--) {
                 if (dots[i].life <= 0) dots.splice(i, 1);
             }
-
             dots.forEach(d => { d.update(); d.draw(); });
-            drawLines();
-            requestAnimationFrame(animate);
+            mDrawLines();
+            requestAnimationFrame(mAnimate);
         }
 
-        let lastSpawnX = 0, lastSpawnY = 0;
-
         document.addEventListener('mousemove', e => {
-            mouse.x = e.clientX;
-            mouse.y = e.clientY;
-            mouse.moving = true;
-
+            mMouse.x = e.clientX;
+            mMouse.y = e.clientY;
+            mMouse.moving = true;
             const dx = e.clientX - lastSpawnX;
             const dy = e.clientY - lastSpawnY;
-            if (dx * dx + dy * dy > 625 && dots.length < MAX_DOTS) {
+            if (dx * dx + dy * dy > 625 && dots.length < M_MAX) {
                 dots.push(new Dot(e.clientX, e.clientY));
                 lastSpawnX = e.clientX;
                 lastSpawnY = e.clientY;
             }
-
-            clearTimeout(idleTimer);
-            idleTimer = setTimeout(() => {
-                mouse.moving = false;
-            }, 120);
+            clearTimeout(mIdleTimer);
+            mIdleTimer = setTimeout(() => { mMouse.moving = false; }, 120);
         });
 
-        animate();
+        mAnimate();
+    })();
     </script>
 </body>
 </html>
