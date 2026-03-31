@@ -91,7 +91,11 @@
         }
     }
 
+    let bgRunning = false;
+    let pageVisible = true;
+
     function renderLoop() {
+        if (!pageVisible) { bgRunning = false; return; }
         ctx.clearRect(0, 0, W, H);
         particles.forEach(p => { p.update(); p.draw(); });
         drawConnections();
@@ -101,6 +105,7 @@
     // ── Mouse interactive particles ──
     const mCanvas = document.createElement('canvas');
     mCanvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2';
+    mCanvas.setAttribute('aria-hidden', 'true');
     document.body.appendChild(mCanvas);
     const mCtx = mCanvas.getContext('2d');
     let mW, mH;
@@ -175,7 +180,10 @@
         }
     }
 
+    let mRunning = true;
+
     function mAnimate() {
+        if (!pageVisible) { mRunning = false; return; }
         mCtx.clearRect(0, 0, mW, mH);
         for (let i = dots.length - 1; i >= 0; i--) {
             if (dots[i].life <= 0) dots.splice(i, 1);
@@ -205,11 +213,19 @@
 
     resize();
     window.addEventListener('resize', resize);
+
+    document.addEventListener('visibilitychange', () => {
+        pageVisible = !document.hidden;
+        if (pageVisible) {
+            if (bgRunning === false) { bgRunning = true; renderLoop(); }
+            if (!mRunning) { mRunning = true; mAnimate(); }
+        }
+    });
+
     mAnimate();
 
-    // ── Expose controls for entrance sequence ──
     window.particleSystem = {
-        startBackground: renderLoop,
+        startBackground: () => { bgRunning = true; renderLoop(); },
         enableMouseSpawn: () => { mSpawning = true; }
     };
 })();

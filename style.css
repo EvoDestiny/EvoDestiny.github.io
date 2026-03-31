@@ -2,7 +2,7 @@
 
 body {
     min-height: 100vh;
-    background: linear-gradient(165deg, #fdf6e3 0%, #fef9ed 40%, #ffffff 100%);
+    background: linear-gradient(165deg, #faf0d7 0%, #fdf4e0 35%, #fffdf7 100%);
     font-family: 'Inter', sans-serif;
     overflow: hidden;
     display: flex;
