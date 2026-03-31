@@ -202,9 +202,20 @@
                 opacity: 0;
             }
         }
+
+        #mouseCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
+    <canvas id="mouseCanvas"></canvas>
     <div class="particles" id="particles"></div>
 
     <div class="container">
@@ -223,7 +234,6 @@
     </div>
 
     <script>
-        // Typing effect
         const phrases = [
             "Developer & Creator.",
             "Crafting elegant digital experiences.",
@@ -244,7 +254,7 @@
                 charIndex++;
                 if (charIndex === current.length) {
                     isDeleting = true;
-                    typingSpeed = 2000; // pause before deleting
+                    typingSpeed = 2000;
                 } else {
                     typingSpeed = 70 + Math.random() * 40;
                 }
@@ -254,7 +264,7 @@
                 if (charIndex === 0) {
                     isDeleting = false;
                     phraseIndex = (phraseIndex + 1) % phrases.length;
-                    typingSpeed = 400; // pause before next phrase
+                    typingSpeed = 400;
                 } else {
                     typingSpeed = 35;
                 }
@@ -263,10 +273,8 @@
             setTimeout(type, typingSpeed);
         }
 
-        // Start typing after intro animations
         setTimeout(type, 1800);
 
-        // Floating particles
         const container = document.getElementById('particles');
         function createParticle() {
             const particle = document.createElement('div');
@@ -287,6 +295,125 @@
             setTimeout(createParticle, i * 400);
         }
         setInterval(createParticle, 1500);
+
+        const cvs = document.getElementById('mouseCanvas');
+        const ctx = cvs.getContext('2d');
+        let mouse = { x: -200, y: -200, moving: false };
+        let idleTimer = null;
+        const dots = [];
+        const MAX_DOTS = 18;
+        const LINE_DIST = 90;
+
+        function resizeCanvas() {
+            cvs.width = window.innerWidth;
+            cvs.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        class Dot {
+            constructor(x, y) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 0.5 + Math.random() * 1.0;
+                this.x = x;
+                this.y = y;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.radius = 1.5 + Math.random() * 1.5;
+                this.alpha = 1;
+                this.life = 1;
+                this.decay = 0.006 + Math.random() * 0.004;
+                this.gathering = false;
+                this.orbitAngle = angle;
+                this.orbitRadius = 25 + Math.random() * 45;
+                this.orbitSpeed = (0.003 + Math.random() * 0.006) * (Math.random() > 0.5 ? 1 : -1);
+            }
+
+            update() {
+                if (!mouse.moving) {
+                    this.orbitAngle += this.orbitSpeed;
+                    const targetX = mouse.x + Math.cos(this.orbitAngle) * this.orbitRadius;
+                    const targetY = mouse.y + Math.sin(this.orbitAngle) * this.orbitRadius;
+                    const dx = targetX - this.x;
+                    const dy = targetY - this.y;
+                    this.vx += dx * 0.0015;
+                    this.vy += dy * 0.0015;
+                    this.vx *= 0.97;
+                    this.vy *= 0.97;
+                    this.gathering = true;
+                    this.life -= this.decay * 0.3;
+                } else {
+                    this.vx *= 0.995;
+                    this.vy *= 0.995;
+                    this.life -= this.decay;
+                    this.gathering = false;
+                }
+
+                this.x += this.vx;
+                this.y += this.vy;
+                this.alpha = Math.max(0, this.life);
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(201, 162, 39, ${this.alpha * 0.7})`;
+                ctx.fill();
+            }
+        }
+
+        function drawLines() {
+            for (let i = 0; i < dots.length; i++) {
+                for (let j = i + 1; j < dots.length; j++) {
+                    const dx = dots[i].x - dots[j].x;
+                    const dy = dots[i].y - dots[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < LINE_DIST) {
+                        const opacity = (1 - dist / LINE_DIST) * Math.min(dots[i].alpha, dots[j].alpha) * 0.4;
+                        ctx.beginPath();
+                        ctx.moveTo(dots[i].x, dots[i].y);
+                        ctx.lineTo(dots[j].x, dots[j].y);
+                        ctx.strokeStyle = `rgba(201, 162, 39, ${opacity})`;
+                        ctx.lineWidth = 0.6;
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, cvs.width, cvs.height);
+            for (let i = dots.length - 1; i >= 0; i--) {
+                if (dots[i].life <= 0) dots.splice(i, 1);
+            }
+
+            dots.forEach(d => { d.update(); d.draw(); });
+            drawLines();
+            requestAnimationFrame(animate);
+        }
+
+        let lastSpawnX = 0, lastSpawnY = 0;
+
+        document.addEventListener('mousemove', e => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+            mouse.moving = true;
+
+            const dx = e.clientX - lastSpawnX;
+            const dy = e.clientY - lastSpawnY;
+            if (dx * dx + dy * dy > 625 && dots.length < MAX_DOTS) {
+                dots.push(new Dot(e.clientX, e.clientY));
+                lastSpawnX = e.clientX;
+                lastSpawnY = e.clientY;
+            }
+
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                mouse.moving = false;
+            }, 120);
+        });
+
+        animate();
     </script>
 </body>
 </html>
