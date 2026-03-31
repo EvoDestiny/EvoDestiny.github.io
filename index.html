@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EvoDestiny</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(165deg, #fdf6e3 0%, #fef9ed 40%, #ffffff 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 720px;
+        }
+
+        .greeting {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(2.8rem, 6vw, 4.5rem);
+            font-weight: 700;
+            color: #2c2c2c;
+            margin-bottom: 0.3em;
+            opacity: 0;
+            animation: fadeSlideUp 2.6s ease forwards 0.3s;
+        }
+
+        .name {
+            font-family: 'Playfair Display', serif;
+            font-style: italic;
+            font-size: clamp(3.2rem, 7vw, 5.5rem);
+            font-weight: 400;
+            background: linear-gradient(135deg, #c9a227, #d4a843, #8b6914);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: fadeSlideUp 2.6s ease forwards 0.9s, shimmer 4s ease-in-out infinite;
+            opacity: 0;
+            margin-bottom: 1.5em;
+        }
+
+        .divider {
+            width: 60px;
+            height: 1.5px;
+            background: #c9a227;
+            margin: 0 auto 2em;
+            opacity: 0;
+            animation: expandWidth 0.8s ease forwards 1s;
+        }
+
+        .tagline {
+            font-size: clamp(1rem, 2.2vw, 1.25rem);
+            font-weight: 300;
+            color: #666;
+            letter-spacing: 0.05em;
+            line-height: 1.8;
+            min-height: 3.6em;
+            opacity: 0;
+            animation: fadeIn 0.6s ease forwards 1.2s;
+        }
+
+        .typing-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1.1em;
+            background: #c9a227;
+            margin-left: 2px;
+            vertical-align: text-bottom;
+            animation: blink 0.8s step-end infinite;
+        }
+
+        .links {
+            margin-top: 3em;
+            display: flex;
+            gap: 2em;
+            justify-content: center;
+            flex-wrap: wrap;
+            opacity: 0;
+            animation: fadeSlideUp 0.8s ease forwards 3.5s;
+        }
+
+        .links a {
+            color: #999;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 300;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            padding: 0.5em 0;
+            position: relative;
+            transition: color 0.3s ease;
+        }
+
+        .links a::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 1px;
+            background: #c9a227;
+            transition: width 0.3s ease;
+        }
+
+        .links a:hover {
+            color: #2c2c2c;
+        }
+
+        .links a:hover::after {
+            width: 100%;
+        }
+
+        /* Floating particles */
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: rgba(201, 162, 39, 0.15);
+            animation: float linear infinite;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+        }
+
+        @keyframes fadeSlideUp {
+            from {
+                opacity: 0;
+                transform: translateY(25px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+
+        @keyframes shimmer {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        @keyframes expandWidth {
+            from {
+                opacity: 0;
+                width: 0;
+            }
+            to {
+                opacity: 1;
+                width: 60px;
+            }
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        @keyframes float {
+            0% {
+                transform: translateY(100vh) scale(0);
+                opacity: 0;
+            }
+            10% {
+                opacity: 1;
+            }
+            90% {
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(-10vh) scale(1);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="particles" id="particles"></div>
+
+    <div class="container">
+        <div class="greeting">Hello, I'm</div>
+        <div class="name">EvoDestiny</div>
+        <div class="divider"></div>
+        <div class="tagline">
+            <span id="typed-text"></span><span class="typing-cursor"></span>
+        </div>
+        <div class="links">
+            <a href="https://github.com/EvoDestiny" target="_blank" rel="noopener">GitHub</a>
+            <a href="#">Blog</a>
+            <a href="#">Projects</a>
+            <a href="#">Contact</a>
+        </div>
+    </div>
+
+    <script>
+        // Typing effect
+        const phrases = [
+            "Developer & Creator.",
+            "Crafting elegant digital experiences.",
+            "Passionate about clean code & design."
+        ];
+
+        const typedEl = document.getElementById('typed-text');
+        let phraseIndex = 0;
+        let charIndex = 0;
+        let isDeleting = false;
+        let typingSpeed = 70;
+
+        function type() {
+            const current = phrases[phraseIndex];
+
+            if (!isDeleting) {
+                typedEl.textContent = current.substring(0, charIndex + 1);
+                charIndex++;
+                if (charIndex === current.length) {
+                    isDeleting = true;
+                    typingSpeed = 2000; // pause before deleting
+                } else {
+                    typingSpeed = 70 + Math.random() * 40;
+                }
+            } else {
+                typedEl.textContent = current.substring(0, charIndex - 1);
+                charIndex--;
+                if (charIndex === 0) {
+                    isDeleting = false;
+                    phraseIndex = (phraseIndex + 1) % phrases.length;
+                    typingSpeed = 400; // pause before next phrase
+                } else {
+                    typingSpeed = 35;
+                }
+            }
+
+            setTimeout(type, typingSpeed);
+        }
+
+        // Start typing after intro animations
+        setTimeout(type, 1800);
+
+        // Floating particles
+        const container = document.getElementById('particles');
+        function createParticle() {
+            const particle = document.createElement('div');
+            particle.classList.add('particle');
+            const size = Math.random() * 4 + 2;
+            particle.style.width = size + 'px';
+            particle.style.height = size + 'px';
+            particle.style.left = Math.random() * 100 + '%';
+            const duration = Math.random() * 12 + 10;
+            particle.style.animationDuration = duration + 's';
+            particle.style.animationDelay = Math.random() * 5 + 's';
+            container.appendChild(particle);
+
+            setTimeout(() => particle.remove(), (duration + 5) * 1000);
+        }
+
+        for (let i = 0; i < 15; i++) {
+            setTimeout(createParticle, i * 400);
+        }
+        setInterval(createParticle, 1500);
+    </script>
+</body>
+</html>
