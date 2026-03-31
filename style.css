@@ -1,0 +1,102 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    min-height: 100vh;
+    background: linear-gradient(165deg, #fdf6e3 0%, #fef9ed 40%, #ffffff 100%);
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.container {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 2rem;
+    max-width: 760px;
+}
+
+.greeting {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2.6rem, 5.5vw, 4.2rem);
+    font-weight: 700;
+    color: #2c2c2c;
+    margin-bottom: 0.15em;
+    user-select: none;
+    opacity: 0;
+    transform: translateY(30px);
+}
+
+.name {
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: clamp(3rem, 7vw, 5.5rem);
+    font-weight: 400;
+    background: linear-gradient(135deg, #c9a227, #d4a843, #8b6914);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: shimmer 5s ease-in-out infinite paused;
+    margin-bottom: 1em;
+    user-select: none;
+    opacity: 0;
+    transform: translateY(30px);
+}
+
+.divider {
+    width: 0;
+    height: 1.5px;
+    background: linear-gradient(90deg, transparent, #c9a227, transparent);
+    margin: 0 auto 1.8em;
+    opacity: 0;
+}
+
+.tagline {
+    font-size: clamp(1rem, 2.2vw, 1.2rem);
+    font-weight: 300;
+    color: #666;
+    letter-spacing: 0.04em;
+    line-height: 1.8;
+    min-height: 2em;
+    user-select: none;
+    opacity: 0;
+}
+
+.links {
+    margin-top: 2.5em;
+    display: flex;
+    gap: 2.2em;
+    justify-content: center;
+    flex-wrap: wrap;
+    opacity: 0;
+    transform: translateY(20px);
+}
+
+.links a {
+    color: #aaa;
+    text-decoration: none;
+    font-size: 0.82rem;
+    font-weight: 400;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 0.5em 0;
+    position: relative;
+    transition: color 0.35s ease;
+}
+
+.links a::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 0;
+    height: 1px;
+    background: #c9a227;
+    transition: width 0.35s ease, left 0.35s ease;
+}
+
+.links a:hover { color: #2c2c2c; }
+.links a:hover::after { width: 100%; left: 0; }

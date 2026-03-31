@@ -1,0 +1,44 @@
+canvas#bgCanvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.typing-cursor {
+    display: inline-block;
+    width: 2.5px;
+    height: 1.15em;
+    margin-left: 3px;
+    vertical-align: text-bottom;
+    border-radius: 1px;
+    background: #c9a227;
+    box-shadow:
+        0 0 4px rgba(201, 162, 39, 0.6),
+        0 0 12px rgba(201, 162, 39, 0.3),
+        0 0 24px rgba(201, 162, 39, 0.1);
+    animation: cursorPulse 1s ease-in-out infinite;
+}
+
+@keyframes cursorPulse {
+    0%, 100% {
+        opacity: 1;
+        box-shadow:
+            0 0 4px rgba(201, 162, 39, 0.6),
+            0 0 12px rgba(201, 162, 39, 0.3),
+            0 0 24px rgba(201, 162, 39, 0.1);
+    }
+    50% {
+        opacity: 0;
+        box-shadow:
+            0 0 2px rgba(201, 162, 39, 0.2),
+            0 0 6px rgba(201, 162, 39, 0.1);
+    }
+}
+
+@keyframes shimmer {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
