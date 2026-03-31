@@ -276,13 +276,13 @@
             }
         }
 
+        let bgRunning = false;
         function renderLoop() {
             ctx.clearRect(0, 0, W, H);
             particles.forEach(p => { p.update(); p.draw(); });
             drawConnections();
             requestAnimationFrame(renderLoop);
         }
-        renderLoop();
 
         // ── Entrance animations (sequential) ──
         const ease = 'cubic-bezier(0.23, 1, 0.32, 1)';
@@ -318,6 +318,9 @@
                 }, 200);
             });
 
+            renderLoop();
+            mSpawning = true;
+
             await new Promise(resolve => {
                 setTimeout(() => {
                     tagline.style.transition = `opacity 700ms ease`;
@@ -328,11 +331,14 @@
 
             startTyping();
 
-            setTimeout(() => {
-                links.style.transition = `opacity 900ms ${ease}, transform 900ms ${ease}`;
-                links.style.opacity = '1';
-                links.style.transform = 'translateY(0)';
-            }, 600);
+            await new Promise(resolve => {
+                setTimeout(() => {
+                    links.style.transition = `opacity 900ms ${ease}, transform 900ms ${ease}`;
+                    links.style.opacity = '1';
+                    links.style.transform = 'translateY(0)';
+                    setTimeout(resolve, 900);
+                }, 600);
+            });
         }
 
         // ── Typing effect ──
@@ -393,6 +399,7 @@
         const M_MAX = 18;
         const M_LINE = 90;
         let lastSpawnX = 0, lastSpawnY = 0;
+        let mSpawning = false;
 
         class Dot {
             constructor(x, y) {
@@ -472,7 +479,7 @@
             mMouse.moving = true;
             const dx = e.clientX - lastSpawnX;
             const dy = e.clientY - lastSpawnY;
-            if (dx * dx + dy * dy > 625 && dots.length < M_MAX) {
+            if (mSpawning && dx * dx + dy * dy > 625 && dots.length < M_MAX) {
                 dots.push(new Dot(e.clientX, e.clientY));
                 lastSpawnX = e.clientX;
                 lastSpawnY = e.clientY;
@@ -482,6 +489,7 @@
         });
 
         mAnimate();
+
     })();
     </script>
 </body>
