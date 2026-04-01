@@ -11,6 +11,15 @@
     <link rel="stylesheet" href="particles.css">
 </head>
 <body>
+    <canvas class="day-bg-canvas" id="dayBgCanvas" aria-hidden="true"></canvas>
+    <div class="city-dusk" id="cityDusk" aria-hidden="true">
+        <div class="dusk-sky"></div>
+        <canvas class="dusk-stars-canvas" id="duskStarsCanvas"></canvas>
+        <div class="dusk-sun"></div>
+        <div class="cloud cloud-1"></div>
+        <div class="cloud cloud-2"></div>
+        <div class="cloud cloud-3"></div>
+    </div>
     <canvas id="bgCanvas" aria-hidden="true"></canvas>
 
     <div class="container">
@@ -27,6 +36,10 @@
             <a href="#">Contact</a>
         </div>
     </div>
+
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
+        <span class="toggle-icon" id="toggleIcon">☀</span>
+    </button>
 
     <script src="particles.js"></script>
     <script src="main.js"></script>

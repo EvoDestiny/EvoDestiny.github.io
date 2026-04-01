@@ -1,6 +1,8 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
+    --link-hover-color: #2c2c2c;
+    --link-underline-color: #c9a227;
     min-height: 100vh;
     background: linear-gradient(165deg, #faf0d7 0%, #fdf4e0 35%, #fffdf7 100%);
     font-family: 'Inter', sans-serif;
@@ -94,9 +96,171 @@ body {
     left: 50%;
     width: 0;
     height: 1px;
-    background: #c9a227;
+    background: var(--link-underline-color);
     transition: width 0.35s ease, left 0.35s ease;
 }
 
-.links a:hover { color: #2c2c2c; }
+.links a:hover { color: var(--link-hover-color); }
 .links a:hover::after { width: 100%; left: 0; }
+
+/* ══════ Daytime Animated Background ══════ */
+
+.day-bg-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* ══════ City Dusk Background ══════ */
+
+.city-dusk {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.dusk-sky {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        180deg,
+        #0f0c29 0%,
+        #1a1a3e 12%,
+        #302b63 28%,
+        #544a7d 40%,
+        #c06c84 54%,
+        #e88a6f 66%,
+        #f5af19 82%,
+        #fceabb 100%
+    );
+    background-size: 100% 200%;
+    animation: skyShift 25s ease-in-out infinite alternate;
+}
+
+@keyframes skyShift {
+    0% { background-position: 0% 0%; }
+    100% { background-position: 0% 25%; }
+}
+
+/* Sun as a subtle, heavily blurred horizon glow */
+.dusk-sun {
+    position: absolute;
+    bottom: 22%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 320px;
+    height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(ellipse, rgba(255, 220, 140, 0.35) 0%, rgba(245, 160, 60, 0.15) 40%, transparent 70%);
+    filter: blur(40px);
+    pointer-events: none;
+    animation: sunBreathe 8s ease-in-out infinite;
+}
+
+@keyframes sunBreathe {
+    0%, 100% { opacity: 0.7; transform: translateX(-50%) scale(1); }
+    50% { opacity: 1; transform: translateX(-50%) scale(1.08); }
+}
+
+.dusk-stars-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.cloud {
+    position: absolute;
+    border-radius: 50px;
+    filter: blur(12px);
+    opacity: 0.6;
+}
+
+.cloud-1 {
+    width: 250px;
+    height: 45px;
+    top: 10%;
+    left: -250px;
+    background: rgba(60, 40, 80, 0.3);
+    animation: cloudDrift 40s linear infinite;
+}
+
+.cloud-2 {
+    width: 380px;
+    height: 55px;
+    top: 20%;
+    left: -380px;
+    background: rgba(50, 30, 70, 0.25);
+    animation: cloudDrift 55s linear infinite;
+    animation-delay: 15s;
+}
+
+.cloud-3 {
+    width: 200px;
+    height: 35px;
+    top: 32%;
+    left: -200px;
+    background: rgba(70, 45, 85, 0.2);
+    animation: cloudDrift 45s linear infinite;
+    animation-delay: 8s;
+}
+
+@keyframes cloudDrift {
+    from { transform: translateX(0); }
+    to { transform: translateX(calc(100vw + 450px)); }
+}
+
+/* ══════ Theme Toggle Button ══════ */
+
+.theme-toggle {
+    position: fixed;
+    top: 1.5rem;
+    right: 1.5rem;
+    z-index: 10;
+    width: 40px;
+    height: 40px;
+    border: 1.5px solid rgba(60, 60, 60, 0.25);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.6s ease, border-color 0.4s ease, background 0.4s ease, box-shadow 0.4s ease;
+    pointer-events: none;
+}
+
+.theme-toggle.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.theme-toggle:hover {
+    background: rgba(150, 140, 120, 0.12);
+    box-shadow: 0 0 12px rgba(201, 162, 39, 0.15);
+}
+
+.toggle-icon {
+    font-size: 1.15rem;
+    line-height: 1;
+    transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1), color 0.4s ease, text-shadow 0.4s ease;
+    display: block;
+    color: #3a3a3a;
+    font-family: 'Inter', sans-serif;
+    user-select: none;
+}
+
+.theme-toggle:active .toggle-icon {
+    transform: rotate(180deg) scale(0.85);
+}
+
