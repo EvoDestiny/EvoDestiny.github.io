@@ -264,3 +264,75 @@ body {
     transform: rotate(180deg) scale(0.85);
 }
 
+/* ══════ Cyberpunk ID Badge ══════ */
+
+.id-badge {
+    position: fixed;
+    top: calc(1.5rem - 4px);
+    left: calc(1.5rem - 4px);
+    z-index: 10;
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-style: italic;
+    font-size: clamp(1.1rem, 2.2vw, 1.5rem);
+    letter-spacing: 0.12em;
+    line-height: 40px;
+    color: #1a1a1a;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.3), 0 0 12px rgba(0, 0, 0, 0.15);
+    user-select: none;
+    animation: glitch 3s infinite;
+    transform: skewX(-6deg);
+}
+
+.id-badge::before,
+.id-badge::after {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.id-badge::before {
+    animation: glitch-clip-top 3s infinite linear alternate-reverse;
+    clip-path: inset(0 0 65% 0);
+    transform: translate(-4px, -2px);
+    opacity: 0.85;
+}
+
+.id-badge::after {
+    animation: glitch-clip-bottom 3s infinite linear alternate-reverse;
+    clip-path: inset(60% 0 0 0);
+    transform: translate(4px, 2px);
+    opacity: 0.85;
+}
+
+@keyframes glitch {
+    0%, 90%, 100% { transform: skewX(-6deg) translate(0); }
+    91% { transform: skewX(-6deg) translate(-6px, 2px); }
+    92% { transform: skewX(-12deg) translate(4px, -2px); }
+    93% { transform: skewX(-6deg) translate(0); }
+    94% { transform: skewX(-6deg) translate(5px, -1px); }
+    95% { transform: skewX(-2deg) translate(-3px, 2px); }
+    96% { transform: skewX(-8deg) translate(3px, 0); }
+    97% { transform: skewX(-6deg) translate(0); }
+}
+
+@keyframes glitch-clip-top {
+    0%, 88%, 100% { clip-path: inset(0 0 65% 0); transform: translate(0); }
+    90% { clip-path: inset(10% 0 50% 0); transform: translate(8px, 0); }
+    92% { clip-path: inset(0 0 60% 0); transform: translate(-6px, 0); }
+    94% { clip-path: inset(15% 0 55% 0); transform: translate(5px, 0); }
+    96% { clip-path: inset(5% 0 65% 0); transform: translate(-4px, 0); }
+}
+
+@keyframes glitch-clip-bottom {
+    0%, 86%, 100% { clip-path: inset(60% 0 0 0); transform: translate(0); }
+    88% { clip-path: inset(50% 0 5% 0); transform: translate(-8px, 0); }
+    91% { clip-path: inset(55% 0 0 0); transform: translate(6px, 0); }
+    94% { clip-path: inset(45% 0 10% 0); transform: translate(-5px, 0); }
+    96% { clip-path: inset(60% 0 0 0); transform: translate(4px, 0); }
+}
+

@@ -74,6 +74,17 @@
                 icon.style.textShadow = 'none';
             }
         }
+
+        // ID badge adapts to theme
+        const idBadge = document.getElementById('idBadge');
+        if (idBadge) {
+            const badgeC = lerpColor([26, 26, 26], [240, 240, 240], t);
+            idBadge.style.color = rgbStr(badgeC);
+            const glowBase = t > 0.5
+                ? `0 0 8px rgba(240, 240, 255, ${t * 0.5}), 0 0 20px rgba(200, 200, 255, ${t * 0.3})`
+                : `0 0 6px rgba(0, 0, 0, ${(1 - t) * 0.3}), 0 0 12px rgba(0, 0, 0, ${(1 - t) * 0.15})`;
+            idBadge.style.textShadow = glowBase;
+        }
     }
 
     function animateTheme(from, to, duration, cb) {
