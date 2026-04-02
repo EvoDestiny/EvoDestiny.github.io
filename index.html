@@ -9,20 +9,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="particles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
-    <div class="id-badge" id="idBadge" data-text="25051030319">25051030319</div>
-    <canvas class="day-bg-canvas" id="dayBgCanvas" aria-hidden="true"></canvas>
-    <div class="city-dusk" id="cityDusk" aria-hidden="true">
-        <div class="dusk-sky"></div>
-        <canvas class="dusk-stars-canvas" id="duskStarsCanvas"></canvas>
-        <div class="dusk-sun"></div>
-        <div class="cloud cloud-1"></div>
-        <div class="cloud cloud-2"></div>
-        <div class="cloud cloud-3"></div>
-    </div>
     <canvas id="bgCanvas" aria-hidden="true"></canvas>
+
+    <div class="student-id" aria-hidden="true"><span>2</span><span>5</span><span>0</span><span>5</span><span>1</span><span>0</span><span>3</span><span>0</span><span>3</span><span>1</span><span>9</span></div>
 
     <div class="container">
         <div class="greeting">Hello, I'm</div>
@@ -39,10 +31,7 @@
         </div>
     </div>
 
-    <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
-        <span class="toggle-icon" id="toggleIcon">☀</span>
-    </button>
-
+    <script src="poisson-disk.js"></script>
     <script src="particles.js"></script>
     <script src="main.js"></script>
 </body>
