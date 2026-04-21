@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "task-01",
+      "label": "Task 01",
+      "state": "sealed",
+      "bundle": "vault/bundles/task-01.vault.json"
+    }
+  ]
+}
