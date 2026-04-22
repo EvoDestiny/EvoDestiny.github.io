@@ -6,7 +6,7 @@
     <title>EvoDestiny</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="particles.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -33,46 +33,50 @@
 
     <div class="project-overlay" id="project-overlay" aria-hidden="true" hidden>
         <section class="project-panel" role="dialog" aria-modal="true" aria-labelledby="project-title" tabindex="-1">
-            <button type="button" class="project-close" id="project-close" aria-label="Close project archive">Close</button>
-            <p class="project-kicker">Project Archive</p>
-            <h2 class="project-title" id="project-title">Archive index.</h2>
+            <button type="button" class="project-close" id="project-close" aria-label="Close project archive">×</button>
+            <p class="project-kicker">Private Archive</p>
+            <h2 class="project-title" id="project-title">Choose your record</h2>
             <p class="project-description">
-                Only numbered entries are exposed here. Task contents remain concealed until a valid private token is entered locally.
+                Select a project below. If the record is sealed, the next step will ask for its access token and unlock it locally in your browser.
             </p>
-            <div class="project-list" id="project-list"></div>
-            <p class="project-footnote">Encrypted bundles remain unreadable until a valid private token is provided.</p>
+            <div class="project-card">
+                <div class="project-list" id="project-list"></div>
+                <p class="project-footnote">Tokens are verified locally. Nothing is written back into the public site.</p>
+            </div>
         </section>
     </div>
 
     <div class="token-overlay" id="token-overlay" aria-hidden="true" hidden>
         <section class="token-panel" role="dialog" aria-modal="true" aria-labelledby="token-title" tabindex="-1">
-            <button type="button" class="token-close" id="token-close" aria-label="Close token prompt">Close</button>
-            <p class="token-kicker">Encrypted Access</p>
+            <button type="button" class="token-close" id="token-close" aria-label="Close token prompt">×</button>
+            <p class="token-kicker">Private Access</p>
+            <h2 class="token-title" id="token-title">Enter your token</h2>
+            <p class="token-description" id="token-description">Use the access token for this record. The archive is decrypted locally in your browser and opened in a new tab.</p>
             <p class="token-meta" id="token-meta"></p>
-            <h2 class="token-title" id="token-title">Unlock archive.</h2>
-            <p class="token-description">Provide the private key below to unseal this record in your browser and open it in a new tab.</p>
-            <form class="token-form" id="token-form" novalidate>
-                <label class="token-label" for="token-input">Access token</label>
-                <div class="token-field">
-                    <input
-                        class="token-input"
-                        id="token-input"
-                        name="token"
-                        type="password"
-                        inputmode="text"
-                        autocomplete="one-time-code"
-                        spellcheck="false"
-                        placeholder="Paste or type the access token"
-                        required
-                    >
-                </div>
-                <p class="token-note">The key is used only for this browser session and is never written into the public site files.</p>
-                <p class="token-status" id="token-status" aria-live="polite"></p>
-                <div class="token-actions">
-                    <button type="submit" class="token-submit" id="token-submit">Unlock</button>
-                    <button type="button" class="token-cancel" id="token-cancel">Cancel</button>
-                </div>
-            </form>
+            <div class="token-card">
+                <form class="token-form" id="token-form" novalidate>
+                    <label class="token-label" for="token-input">Access token</label>
+                    <div class="token-field">
+                        <input
+                            class="token-input"
+                            id="token-input"
+                            name="token"
+                            type="password"
+                            inputmode="text"
+                            autocomplete="one-time-code"
+                            spellcheck="false"
+                            placeholder="Enter your token"
+                            required
+                        >
+                    </div>
+                    <p class="token-status" id="token-status" aria-live="polite"></p>
+                    <button type="submit" class="token-submit" id="token-submit">Continue with token</button>
+                    <p class="token-note">By continuing, the token is checked only in this browser session and never stored in the public site files.</p>
+                </form>
+            </div>
+            <div class="token-actions">
+                <button type="button" class="token-cancel" id="token-cancel">Back</button>
+            </div>
         </section>
     </div>
 

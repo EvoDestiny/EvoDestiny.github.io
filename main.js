@@ -46,6 +46,7 @@
     const tokenForm = document.getElementById('token-form');
     const tokenMeta = document.getElementById('token-meta');
     const tokenTitle = document.getElementById('token-title');
+    const tokenDescription = document.getElementById('token-description');
     const tokenInput = document.getElementById('token-input');
     const tokenStatus = document.getElementById('token-status');
     const tokenClose = document.getElementById('token-close');
@@ -576,9 +577,12 @@
         if (!record) return;
 
         state.activeRecord = record;
-        tokenTitle.textContent = `Unlock ${record.label}`;
+        tokenTitle.textContent = 'Enter your token';
         if (tokenMeta) {
-            tokenMeta.textContent = `${record.id.toUpperCase()} · ${record.state === 'sealed' ? 'Private archive' : 'Available archive'}`;
+            tokenMeta.textContent = `${record.label} · ${record.id.toUpperCase()}`;
+        }
+        if (tokenDescription) {
+            tokenDescription.textContent = `Use the access token for ${record.label}. The archive is decrypted locally in your browser and opens in a new tab.`;
         }
         setTokenStatus('');
         if (tokenForm) tokenForm.reset();
@@ -697,9 +701,9 @@
         state.projects.forEach((project, index) => {
             appendRow({
                 label: project.label,
-                meta: project.state === 'sealed' ? 'Encrypted bundle · local token required' : 'Published archive',
+                meta: project.state === 'sealed' ? 'Access token required to unlock locally' : 'Published archive',
                 access: project.state === 'sealed' ? 'Sealed' : 'Open',
-                actionLabel: 'Enter',
+                actionLabel: 'Continue',
                 disabled: false,
                 taskId: project.id
             }, index);
