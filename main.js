@@ -397,78 +397,111 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Unlocking ${label}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --card-bg: #faf9f5;
+            --card-surface: #ffffff;
+            --card-text: #171615;
+            --card-muted: #6f6a63;
+            --card-border: #d8d2c8;
+            --card-border-strong: #cbc4ba;
+            --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.75), 0 20px 44px rgba(48, 38, 20, 0.08);
+            --card-button: #171615;
+        }
         body {
             margin: 0;
             min-height: 100vh;
             display: grid;
             place-items: center;
-            padding: 24px;
+            padding: 20px;
             font-family: Inter, sans-serif;
-            background: linear-gradient(165deg, #f3ede4 0%, #f6f2ea 40%, #fbf8f3 100%);
-            color: #2c2c2c;
+            background: var(--card-bg);
+            color: var(--card-text);
         }
         main {
-            width: min(460px, 100%);
-            padding: 28px 28px 24px;
-            border-radius: 28px;
-            border: 1px solid rgba(34, 37, 42, 0.1);
-            background: linear-gradient(180deg, rgba(252, 251, 248, 0.96), rgba(247, 244, 239, 0.98));
-            box-shadow:
-                0 24px 70px rgba(30, 34, 39, 0.1),
-                0 8px 22px rgba(30, 34, 39, 0.06),
-                inset 0 1px 0 rgba(255, 255, 255, 0.84);
-        }
-        .eyebrow {
-            margin: 0;
-            color: #8f8777;
-            font-size: 11px;
-            letter-spacing: .28em;
-            text-transform: uppercase;
+            width: min(640px, 100%);
+            text-align: center;
         }
         h1 {
-            margin: 12px 0 10px;
-            font-family: "Playfair Display", Georgia, serif;
-            font-size: clamp(32px, 4vw, 42px);
-            line-height: 1.04;
-            font-weight: 400;
+            margin: 0 auto;
+            width: min(100%, 35rem);
+            font-family: "Cormorant Garamond", "Times New Roman", serif;
+            font-size: clamp(4rem, 9vw, 5.3rem);
+            line-height: 0.93;
+            font-weight: 500;
+            letter-spacing: -0.04em;
+            text-wrap: balance;
         }
         p {
             margin: 0;
-            color: #6d6658;
-            font-size: 14px;
-            line-height: 1.7;
+            color: var(--card-muted);
+        }
+        .description {
+            margin: 0.9rem auto 0;
+            width: min(100%, 35rem);
+            font-family: "Cormorant Garamond", "Times New Roman", serif;
+            font-size: clamp(1.15rem, 2.8vw, 1.4rem);
+            font-weight: 500;
+            line-height: 1.1;
+            color: var(--card-text);
+            text-wrap: pretty;
+        }
+        .card {
+            margin-top: 2rem;
+            padding: clamp(1.15rem, 2.8vw, 1.55rem);
+            border: 1px solid var(--card-border);
+            border-radius: 2rem;
+            background: var(--card-bg);
+            box-shadow: var(--card-shadow);
         }
         .status {
-            margin-top: 18px;
+            display: grid;
+            gap: 0.9rem;
+        }
+        .status-badge {
+            width: 100%;
+            min-height: 3.45rem;
             display: inline-flex;
             align-items: center;
-            gap: 10px;
-            padding: 10px 14px;
-            border-radius: 999px;
-            border: 1px solid rgba(34, 37, 42, 0.08);
-            background: rgba(34, 37, 42, 0.05);
-            color: #595341;
-            font-size: 11px;
-            letter-spacing: .18em;
-            text-transform: uppercase;
+            justify-content: center;
+            padding: 0.9rem 1.2rem;
+            border-radius: 0.95rem;
+            background: var(--card-button);
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            box-sizing: border-box;
         }
-        .status::before {
-            content: "";
-            width: 7px;
-            height: 7px;
-            border-radius: 999px;
-            background: #7d7567;
-            box-shadow: 0 0 0 5px rgba(125, 117, 103, 0.1);
+        .status-note {
+            max-width: 46ch;
+            margin: 0 auto;
+            font-size: 0.84rem;
+            line-height: 1.5;
+            color: var(--card-muted);
+        }
+        @media (max-width: 640px) {
+            body {
+                padding: 14px;
+            }
+            .card {
+                border-radius: 1.65rem;
+            }
         }
     </style>
 </head>
 <body>
     <main>
-        <p class="eyebrow">Encrypted access</p>
         <h1>${label}</h1>
-        <p>Your archive is being decrypted locally and prepared in a new browser tab.</p>
-        <div class="status">Unsealing</div>
+        <p class="description">Your archive is being decrypted locally and prepared in a new browser tab.</p>
+        <section class="card" aria-label="Archive status">
+            <div class="status">
+                <div class="status-badge">Opening archive</div>
+                <p class="status-note">Please wait while the sealed bundle is unpacked and loaded from this browser session.</p>
+            </div>
+        </section>
     </main>
 </body>
 </html>`);

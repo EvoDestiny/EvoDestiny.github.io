@@ -31,18 +31,18 @@
     --primary-shadow-hover: 0 1px 1px rgba(17, 24, 39, 0.05), 0 14px 28px rgba(17, 24, 39, 0.12);
     --error: #8f4335;
     --success: #55663f;
-    --claude-bg: #faf9f5;
-    --claude-surface: #ffffff;
-    --claude-text: #171615;
-    --claude-muted: #6f6a63;
-    --claude-border: #d8d2c8;
-    --claude-border-strong: #cbc4ba;
-    --claude-placeholder: #798391;
-    --claude-button: #171615;
-    --claude-button-hover: #252220;
-    --claude-focus: #2f79f5;
-    --claude-focus-shadow: rgba(47, 121, 245, 0.18);
-    --claude-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.75), 0 20px 44px rgba(48, 38, 20, 0.08);
+    --card-bg: #faf9f5;
+    --card-surface: #ffffff;
+    --card-text: #171615;
+    --card-muted: #6f6a63;
+    --card-border: #d8d2c8;
+    --card-border-strong: #cbc4ba;
+    --card-placeholder: #798391;
+    --card-button: #171615;
+    --card-button-hover: #252220;
+    --card-focus: #2f79f5;
+    --card-focus-shadow: rgba(47, 121, 245, 0.18);
+    --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.75), 0 20px 44px rgba(48, 38, 20, 0.08);
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
@@ -265,7 +265,7 @@ body.modal-open .student-id {
     width: min(660px, 100%);
     --panel-copy-width: min(100%, 35rem);
     padding: clamp(1.8rem, 4vw, 2.6rem) clamp(1rem, 3vw, 1.4rem);
-    color: var(--claude-text);
+    color: var(--card-text);
     opacity: 0;
     transform: translateY(14px);
     transition: opacity 260ms ease, transform 380ms var(--ease-out);
@@ -312,7 +312,7 @@ body.modal-open .student-id {
 .project-close:hover,
 .token-close:hover {
     background: rgba(23, 22, 21, 0.06);
-    color: var(--claude-text);
+    color: var(--card-text);
     transform: translateY(-1px);
 }
 
@@ -333,7 +333,7 @@ body.modal-open .student-id {
     letter-spacing: -0.04em;
     text-align: center;
     text-wrap: balance;
-    color: var(--claude-text);
+    color: var(--card-text);
 }
 
 .project-title {
@@ -354,16 +354,16 @@ body.modal-open .student-id {
     line-height: 1.1;
     text-align: center;
     text-wrap: pretty;
-    color: var(--claude-text);
+    color: var(--card-text);
 }
 
 .project-card,
 .token-card {
     margin-top: 2rem;
-    border: 1px solid var(--claude-border);
+    border: 1px solid var(--card-border);
     border-radius: 2rem;
-    background: var(--claude-bg);
-    box-shadow: var(--claude-card-shadow);
+    background: var(--card-bg);
+    box-shadow: var(--card-shadow);
 }
 
 .project-card {
@@ -385,9 +385,9 @@ body.modal-open .student-id {
     align-items: center;
     gap: 0.95rem 1rem;
     padding: 1rem 1rem 1rem 1.1rem;
-    border: 1px solid var(--claude-border);
+    border: 1px solid var(--card-border);
     border-radius: 1rem;
-    background: var(--claude-surface);
+    background: var(--card-surface);
     opacity: 0;
     transform: translateY(10px);
     transition:
@@ -404,7 +404,7 @@ body.modal-open .student-id {
 }
 
 .project-row:hover {
-    border-color: var(--claude-border-strong);
+    border-color: var(--card-border-strong);
     box-shadow: 0 10px 24px rgba(43, 31, 17, 0.05);
 }
 
@@ -418,7 +418,7 @@ body.modal-open .student-id {
     font-size: 0.72rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--claude-muted);
+    color: var(--card-muted);
 }
 
 .project-record-label {
@@ -426,11 +426,11 @@ body.modal-open .student-id {
     font-size: 1.08rem;
     font-weight: 600;
     line-height: 1.2;
-    color: var(--claude-text);
+    color: var(--card-text);
 }
 
 .project-record-meta {
-    color: var(--claude-muted);
+    color: var(--card-muted);
     font-size: 0.9rem;
     line-height: 1.45;
 }
@@ -446,7 +446,7 @@ body.modal-open .student-id {
     padding: 0.8rem 1.2rem;
     border-radius: 0.9rem;
     border: 0;
-    background: var(--claude-button);
+    background: var(--card-button);
     color: #fff;
     font-size: 1rem;
     font-weight: 600;
@@ -463,7 +463,7 @@ body.modal-open .student-id {
 .project-action:hover,
 .project-action:focus-visible {
     transform: translateY(-1px);
-    background: var(--claude-button-hover);
+    background: var(--card-button-hover);
     box-shadow: 0 10px 24px rgba(23, 22, 21, 0.14);
 }
 
@@ -482,7 +482,7 @@ body.modal-open .student-id {
 .token-meta {
     margin-top: 0.8rem;
     width: var(--panel-copy-width);
-    color: var(--claude-muted);
+    color: var(--card-muted);
     font-size: 0.92rem;
     line-height: 1.4;
     text-align: center;
@@ -511,14 +511,14 @@ body.modal-open .student-id {
 
 .token-field {
     border-radius: 0.95rem;
-    border: 1px solid var(--claude-border);
+    border: 1px solid var(--card-border);
     background: #fff;
     transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
 .token-field:focus-within {
-    border-color: var(--claude-focus);
-    box-shadow: 0 0 0 4px var(--claude-focus-shadow);
+    border-color: var(--card-focus);
+    box-shadow: 0 0 0 4px var(--card-focus-shadow);
     background: #fff;
 }
 
@@ -529,7 +529,7 @@ body.modal-open .student-id {
     padding: 1rem 0.95rem;
     background: transparent;
     box-shadow: none;
-    color: var(--claude-text);
+    color: var(--card-text);
     font: inherit;
     font-size: 1rem;
     letter-spacing: 0.01em;
@@ -541,13 +541,13 @@ body.modal-open .student-id {
 }
 
 .token-input::placeholder {
-    color: var(--claude-placeholder);
+    color: var(--card-placeholder);
 }
 
 .token-note {
     margin: 0.2rem auto 0;
     max-width: 46ch;
-    color: var(--claude-muted);
+    color: var(--card-muted);
     font-size: 0.84rem;
     line-height: 1.5;
     text-align: center;
@@ -557,7 +557,7 @@ body.modal-open .student-id {
     min-height: 0;
     padding: 0;
     border-radius: 0.95rem;
-    color: var(--claude-muted);
+    color: var(--card-muted);
     font-size: 0.88rem;
     line-height: 1.5;
     text-align: center;
@@ -570,7 +570,7 @@ body.modal-open .student-id {
     padding: 0.8rem 0.95rem;
     opacity: 1;
     transform: translateY(0);
-    border: 1px solid var(--claude-border);
+    border: 1px solid var(--card-border);
     background: #fff;
 }
 
@@ -609,16 +609,16 @@ body.modal-open .student-id {
     width: 100%;
     border: 0;
     border-radius: 0.95rem;
-    background: var(--claude-button);
+    background: var(--card-button);
     color: #fff;
 }
 
 .token-cancel {
     width: min(100%, 20rem);
-    border: 1px solid var(--claude-border-strong);
+    border: 1px solid var(--card-border-strong);
     border-radius: 1rem;
     background: #fff;
-    color: var(--claude-text);
+    color: var(--card-text);
 }
 
 .token-submit:hover,
@@ -630,7 +630,7 @@ body.modal-open .student-id {
 
 .token-submit:hover,
 .token-submit:focus-visible {
-    background: var(--claude-button-hover);
+    background: var(--card-button-hover);
     box-shadow: 0 10px 24px rgba(23, 22, 21, 0.14);
 }
 
@@ -656,7 +656,7 @@ body.modal-open .student-id {
 
 .project-footnote {
     margin-top: 1rem;
-    color: var(--claude-muted);
+    color: var(--card-muted);
     font-size: 0.84rem;
     line-height: 1.5;
     text-align: center;
