@@ -1,5 +1,7 @@
 importScripts('vendor/argon2-bundled.min.js');
 
+const textEncoder = new TextEncoder();
+
 function base64ToBytes(base64Value) {
     const binary = self.atob(base64Value);
     const bytes = new Uint8Array(binary.length);
@@ -17,7 +19,33 @@ function createWorkerError(message) {
     return error;
 }
 
-async function deriveAesKey(token, kdf) {
+function getBundleAad(bundlePayload) {
+    if (!bundlePayload || !bundlePayload.bundleId) {
+        return undefined;
+    }
+
+    return textEncoder.encode(`evo-vault-archive:${bundlePayload.taskId}:${bundlePayload.bundleId}`);
+}
+
+function getSlotAad(bundlePayload, slot) {
+    if (!bundlePayload || !bundlePayload.bundleId || !slot || !slot.id) {
+        return undefined;
+    }
+
+    return textEncoder.encode(`evo-vault-slot:${bundlePayload.taskId}:${bundlePayload.bundleId}:${slot.id}`);
+}
+
+async function importAesKey(keyBytes, usages) {
+    return self.crypto.subtle.importKey(
+        'raw',
+        keyBytes,
+        'AES-GCM',
+        false,
+        usages
+    );
+}
+
+async function deriveTokenKey(token, kdf) {
     if (!self.argon2 || typeof self.argon2.hash !== 'function') {
         throw createWorkerError('Argon2 runtime unavailable.');
     }
@@ -32,16 +60,10 @@ async function deriveAesKey(token, kdf) {
         type: self.argon2.ArgonType.Argon2id
     });
 
-    return self.crypto.subtle.importKey(
-        'raw',
-        result.hash,
-        'AES-GCM',
-        false,
-        ['decrypt']
-    );
+    return importAesKey(result.hash, ['decrypt']);
 }
 
-function validateBundlePayload(bundlePayload) {
+function validateLegacyBundlePayload(bundlePayload) {
     if (!bundlePayload || bundlePayload.version !== 2) {
         throw createWorkerError('Archive format is outdated and must be resealed.');
     }
@@ -55,30 +77,104 @@ function validateBundlePayload(bundlePayload) {
     }
 }
 
+function validateVaultBundlePayload(bundlePayload) {
+    if (!bundlePayload || bundlePayload.version !== 3) {
+        throw createWorkerError('Archive format is unsupported.');
+    }
+
+    if (!bundlePayload.bundleId || !bundlePayload.bundle || bundlePayload.bundle.cipher !== 'AES-GCM') {
+        throw createWorkerError('Archive cipher is unsupported.');
+    }
+
+    if (!Array.isArray(bundlePayload.slots)) {
+        throw createWorkerError('Archive unlock slots are missing.');
+    }
+}
+
+function getTokenSlot(bundlePayload) {
+    return bundlePayload.slots.find(slot => slot && slot.type === 'token-argon2id');
+}
+
+async function decryptLegacyBundle(bundlePayload, token) {
+    validateLegacyBundlePayload(bundlePayload);
+
+    const key = await deriveTokenKey(token, bundlePayload.kdf);
+    return self.crypto.subtle.decrypt(
+        {
+            name: 'AES-GCM',
+            iv: base64ToBytes(bundlePayload.bundle.iv)
+        },
+        key,
+        base64ToBytes(bundlePayload.bundle.ciphertext)
+    );
+}
+
+async function unwrapVaultKey(bundlePayload, token) {
+    validateVaultBundlePayload(bundlePayload);
+
+    const tokenSlot = getTokenSlot(bundlePayload);
+    if (!tokenSlot || tokenSlot.cipher !== 'AES-GCM' || !tokenSlot.kdf || tokenSlot.kdf.name !== 'Argon2id') {
+        throw createWorkerError('Archive token slot is unavailable.');
+    }
+
+    const slotKey = await deriveTokenKey(token, tokenSlot.kdf);
+    const vaultKey = await self.crypto.subtle.decrypt(
+        {
+            name: 'AES-GCM',
+            iv: base64ToBytes(tokenSlot.iv),
+            additionalData: getSlotAad(bundlePayload, tokenSlot)
+        },
+        slotKey,
+        base64ToBytes(tokenSlot.wrappedVaultKey)
+    );
+
+    return new Uint8Array(vaultKey);
+}
+
+async function decryptVaultBundle(bundlePayload, vaultKeyBytes) {
+    validateVaultBundlePayload(bundlePayload);
+
+    const key = await importAesKey(vaultKeyBytes, ['decrypt']);
+    return self.crypto.subtle.decrypt(
+        {
+            name: 'AES-GCM',
+            iv: base64ToBytes(bundlePayload.bundle.iv),
+            additionalData: getBundleAad(bundlePayload)
+        },
+        key,
+        base64ToBytes(bundlePayload.bundle.ciphertext)
+    );
+}
+
 self.addEventListener('message', async event => {
-    const { id, token, bundlePayload } = event.data || {};
+    const { id, mode = 'token', token, vaultKey, bundlePayload } = event.data || {};
     if (typeof id !== 'number') return;
 
     try {
-        validateBundlePayload(bundlePayload);
+        let plaintext;
+        let unwrappedVaultKey = null;
 
-        const key = await deriveAesKey(token, bundlePayload.kdf);
-        const plaintext = await self.crypto.subtle.decrypt(
-            {
-                name: 'AES-GCM',
-                iv: base64ToBytes(bundlePayload.bundle.iv)
-            },
-            key,
-            base64ToBytes(bundlePayload.bundle.ciphertext)
-        );
+        if (bundlePayload && bundlePayload.version === 2) {
+            if (mode !== 'token') {
+                throw createWorkerError('Legacy archives require a token.');
+            }
+
+            plaintext = await decryptLegacyBundle(bundlePayload, token);
+        } else if (mode === 'vaultKey') {
+            plaintext = await decryptVaultBundle(bundlePayload, new Uint8Array(vaultKey));
+        } else {
+            unwrappedVaultKey = await unwrapVaultKey(bundlePayload, token);
+            plaintext = await decryptVaultBundle(bundlePayload, unwrappedVaultKey);
+        }
 
         self.postMessage(
             {
                 id,
                 ok: true,
-                archiveBytes: plaintext
+                archiveBytes: plaintext,
+                vaultKey: unwrappedVaultKey ? unwrappedVaultKey.buffer : null
             },
-            [plaintext]
+            unwrappedVaultKey ? [plaintext, unwrappedVaultKey.buffer] : [plaintext]
         );
     } catch (error) {
         const message = error && error.isVaultWorkerError

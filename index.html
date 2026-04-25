@@ -70,8 +70,25 @@
                         >
                     </div>
                     <p class="token-status" id="token-status" aria-live="polite"></p>
+                    <div class="saved-passkey-option" id="saved-passkey-option" hidden>
+                        <button type="button" class="saved-passkey-button" id="saved-passkey-button">Use saved Passkey</button>
+                        <p class="saved-passkey-detail" id="saved-passkey-detail">Saved Passkey unlock is available. Windows Security opens only after you choose Use saved Passkey.</p>
+                    </div>
+                    <label class="device-pass-option" id="device-pass-option" for="device-pass-input">
+                        <input
+                            class="device-pass-input"
+                            id="device-pass-input"
+                            name="device-pass"
+                            type="checkbox"
+                            checked
+                        >
+                        <span class="device-pass-copy">
+                            <span class="device-pass-title">Remember this device with Passkey</span>
+                            <span class="device-pass-detail">Passkey unlock stays saved on this device; fallback local tickets last 5 uses or 24 hours.</span>
+                        </span>
+                    </label>
                     <button type="submit" class="token-submit" id="token-submit">Continue with token</button>
-                    <p class="token-note">By continuing, the token is checked only in this browser session and never stored in the public site files.</p>
+                    <p class="token-note">The token is never stored. Passkey PRF unlocks stay saved locally; fallback browser-key tickets are limited to 5 uses or 24 hours.</p>
                 </form>
             </div>
             <div class="token-actions">

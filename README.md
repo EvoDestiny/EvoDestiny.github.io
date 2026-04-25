@@ -29,15 +29,24 @@
 - 一个项目清单，用来告诉前端有哪些项目入口
 - 一个或多个加密后的项目包，对应每个 task 的实际内容
 
-每个项目在封存时，会先把整个目录打成一个包，再对这个包进行加密。当前这一步使用的是 `Argon2id + AES-GCM`。公开文件里保存的是密文，以及解密时要用到的一些参数；真正的 `access token` 不会写进公开页面里。
+每个项目在封存时，会先把整个目录打成一个包，再用随机生成的 `vaultKey` 对这个包进行 `AES-GCM` 加密。`access token` 不直接加密正文，而是通过 `Argon2id` 派生出一把包装密钥，用来解开 `vaultKey`。公开文件里保存的是密文、token slot 和解密参数；真正的 `access token` 不会写进公开页面里。
 
 当用户在页面中输入 `access token` 后，浏览器会在本地完成这些步骤：
 
 1. 读取对应的加密包
-2. 根据 `access token` 生成解密所需的密钥
-3. 解开整个项目包
-4. 在内存中展开其中的文件
-5. 用临时地址把页面打开
+2. 根据 `access token` 解开对应的 token slot
+3. 取回本次 archive 的 `vaultKey`
+4. 解开整个项目包
+5. 在内存中展开其中的文件
+6. 用临时地址把页面打开
+
+如果用户选择绑定设备，浏览器会优先尝试用一个站点级 Passkey PRF 保护本地设备 ticket。第一次成功保存 PRF 时会创建一个系统 Passkey；后续其他 task 会复用同一个 Passkey，只为各自的 `vaultKey` 保存独立的本地 ticket，不再为每个 task 创建新的系统凭证。PRF ticket 是当前设备上的长期授权，不受 5 次或 24 小时限制；如果当前浏览器、认证器或用户授权导致 PRF 不可用，则退到 IndexedDB 中不可导出的 Web Crypto `CryptoKey`。降级 ticket 本身是一段本地密文，会写入 IndexedDB，并以同样的密文在 localStorage 中保留一份镜像；降级方案最多用于 5 次或 24 小时。持久本地存储不可用时，才只保留当前页面会话内的免输入缓存。
+
+Passkey/Windows Security 不会在点击项目或 token 校验成功时自动弹出。点击项目只会打开 token 面板；如果本浏览器保存过 PRF ticket，token 输入框下面会出现 `Use saved Passkey`，只有用户点这个按钮时才会触发系统授权。输入正确 token 后，如果勾选了 `Remember this device with Passkey`，页面会先进入 `Save Passkey` 步骤，只有用户再次点击保存时才尝试创建或复用站点级 Passkey；取消或创建失败时才写入 5 次/24 小时的本地降级 ticket。
+
+浏览器不能在不调用 WebAuthn 的情况下静默枚举或确认系统里是否仍保存着对应 Passkey。因此如果用户在 Windows 里手动删除了通行凭证，而站点本地 ticket 还在，页面仍可能显示 `Use saved Passkey` 入口；点击后验证会失败，用户需要重新输入 token 来刷新设备授权。
+
+本地测试 Passkey PRF 时，建议使用 `http://localhost:<port>`，不要使用 `http://127.0.0.1:<port>`。Passkey/WebAuthn 的 RP ID 更适合域名 origin；IP origin 不能创建 PRF Passkey，站点会改用 5 次/24 小时的 local fallback；如果持久存储也不可用，才只保留当前会话缓存。
 
 所以，公开站点里保存的是“加密后的项目包”，而不是可以直接访问的项目原文件。
 

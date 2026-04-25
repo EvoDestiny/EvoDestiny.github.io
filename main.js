@@ -3,6 +3,15 @@
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const manifestUrl = 'vault/records.json';
     const vaultMetaFile = '__vault.json';
+    const devicePassDbName = 'evo-vault-device-passes';
+    const devicePassStoreName = 'tickets';
+    const devicePassKeyStoreName = 'keys';
+    const devicePassLocalStorageKey = 'evo-vault-device-tickets-v1';
+    const devicePassCredentialStorageKey = 'evo-vault-passkey-credential-v1';
+    const devicePassMaxUses = 5;
+    const devicePassTtlMs = 24 * 60 * 60 * 1000;
+    const devicePassClockSkewMs = 90 * 1000;
+    const devicePassTicketPrefix = 'EVT3';
     const textDecoder = new TextDecoder();
     const textEncoder = new TextEncoder();
 
@@ -52,14 +61,30 @@
     const tokenClose = document.getElementById('token-close');
     const tokenCancel = document.getElementById('token-cancel');
     const tokenSubmit = document.getElementById('token-submit');
+    const savedPasskeyOption = document.getElementById('saved-passkey-option');
+    const savedPasskeyButton = document.getElementById('saved-passkey-button');
+    const savedPasskeyDetail = document.getElementById('saved-passkey-detail');
+    const tokenField = tokenForm?.querySelector('.token-field') || null;
+    const tokenLabel = tokenForm?.querySelector('.token-label') || null;
+    const tokenNote = tokenForm?.querySelector('.token-note') || null;
+    const devicePassInput = document.getElementById('device-pass-input');
+    const devicePassOption = document.getElementById('device-pass-option');
+    const devicePassDetail = devicePassOption?.querySelector('.device-pass-detail') || null;
+    const defaultTokenNote = tokenNote ? tokenNote.textContent : '';
 
     const state = {
         activeRecord: null,
         bundleCache: new Map(),
         closeTimer: 0,
+        devicePassDb: null,
+        devicePassDbReady: null,
+        deviceTickets: new Map(),
         manifestError: '',
         manifestLoaded: false,
+        pendingUnlock: null,
+        pendingSavedAccess: null,
         projects: [],
+        sessionVaultKeys: new Map(),
         tokenTimer: 0,
         unlocking: false
     };
@@ -70,6 +95,7 @@
     let lastFocusedElement = null;
     let decryptWorker = null;
     let decryptMessageId = 0;
+    let passkeyClientCapabilitiesReady = null;
 
     const pendingDecryptions = new Map();
 
@@ -151,6 +177,137 @@
         return bytes;
     }
 
+    function bytesToBase64url(bytes) {
+        let binary = '';
+
+        for (let index = 0; index < bytes.length; index += 1) {
+            binary += String.fromCharCode(bytes[index]);
+        }
+
+        return window.btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/g, '');
+    }
+
+    function base64urlToBytes(base64urlValue) {
+        const base64Value = base64urlValue
+            .replace(/-/g, '+')
+            .replace(/_/g, '/')
+            .padEnd(Math.ceil(base64urlValue.length / 4) * 4, '=');
+
+        return base64ToBytes(base64Value);
+    }
+
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+    }
+
+    function getRandomBytes(length) {
+        const bytes = new Uint8Array(length);
+        window.crypto.getRandomValues(bytes);
+        return bytes;
+    }
+
+    function getBundleId(bundlePayload) {
+        if (bundlePayload && bundlePayload.bundleId) {
+            return bundlePayload.bundleId;
+        }
+
+        return bundlePayload && bundlePayload.taskId
+            ? `legacy:${bundlePayload.version}:${bundlePayload.taskId}`
+            : 'legacy:unknown';
+    }
+
+    function getSessionVaultKey(record, bundlePayload) {
+        const cached = state.sessionVaultKeys.get(record.id);
+        const now = Date.now();
+
+        if (!cached || cached.bundleId !== getBundleId(bundlePayload)) {
+            return null;
+        }
+
+        if (cached.usesRemaining <= 0 || now > cached.expiresAt || now + devicePassClockSkewMs < cached.lastUsedAt) {
+            state.sessionVaultKeys.delete(record.id);
+            renderProjects();
+            return null;
+        }
+
+        cached.usesRemaining -= 1;
+        cached.lastUsedAt = now;
+
+        if (cached.usesRemaining <= 0) {
+            state.sessionVaultKeys.delete(record.id);
+        }
+
+        renderProjects();
+        return cached.vaultKey;
+    }
+
+    function setSessionVaultKey(record, bundlePayload, vaultKey) {
+        if (!vaultKey || !bundlePayload || bundlePayload.version !== 3) {
+            return;
+        }
+
+        const now = Date.now();
+
+        state.sessionVaultKeys.set(record.id, {
+            bundleId: getBundleId(bundlePayload),
+            vaultKey,
+            usesRemaining: devicePassMaxUses,
+            expiresAt: now + devicePassTtlMs,
+            lastUsedAt: now
+        });
+
+        renderProjects();
+    }
+
+    function isIpHostname(hostname) {
+        return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.includes(':');
+    }
+
+    function getPasskeyRpId() {
+        const hostname = window.location.hostname;
+
+        if (!hostname || isIpHostname(hostname)) {
+            return '';
+        }
+
+        return hostname;
+    }
+
+    async function getPasskeyClientCapabilities() {
+        if (!window.PublicKeyCredential || typeof window.PublicKeyCredential.getClientCapabilities !== 'function') {
+            return null;
+        }
+
+        if (!passkeyClientCapabilitiesReady) {
+            passkeyClientCapabilitiesReady = window.PublicKeyCredential.getClientCapabilities()
+                .catch(error => {
+                    console.warn('WebAuthn client capability detection failed:', error);
+                    return null;
+                });
+        }
+
+        return passkeyClientCapabilitiesReady;
+    }
+
+    async function isPasskeyPrfExplicitlyUnavailable() {
+        const capabilities = await getPasskeyClientCapabilities();
+
+        return Boolean(
+            capabilities &&
+            Object.prototype.hasOwnProperty.call(capabilities, 'prf') &&
+            capabilities.prf === false
+        );
+    }
+
     function handleDecryptWorkerMessage(event) {
         const payload = event.data || {};
         const pending = pendingDecryptions.get(payload.id);
@@ -164,7 +321,10 @@
             return;
         }
 
-        pending.resolve(new Uint8Array(payload.archiveBytes));
+        pending.resolve({
+            archiveBytes: new Uint8Array(payload.archiveBytes),
+            vaultKey: payload.vaultKey ? new Uint8Array(payload.vaultKey) : null
+        });
     }
 
     function resetDecryptWorker(message = 'Decryptor unavailable in this browser.') {
@@ -202,8 +362,8 @@
         return decryptWorker;
     }
 
-    async function decryptBundle(bundlePayload, token) {
-        if (!bundlePayload || bundlePayload.version !== 2 || !bundlePayload.kdf || bundlePayload.kdf.name !== 'Argon2id') {
+    async function runDecryptWorker(message) {
+        if (!message.bundlePayload || ![2, 3].includes(message.bundlePayload.version)) {
             throw new Error('Archive format is outdated and must be resealed.');
         }
 
@@ -219,8 +379,7 @@
                 try {
                     worker.postMessage({
                         id,
-                        token,
-                        bundlePayload
+                        ...message
                     });
                 } catch (error) {
                     pendingDecryptions.delete(id);
@@ -230,6 +389,22 @@
         } catch (error) {
             throw error instanceof Error ? error : new Error('Unable to unlock this record.');
         }
+    }
+
+    async function decryptBundleWithToken(bundlePayload, token) {
+        return runDecryptWorker({
+            mode: 'token',
+            token,
+            bundlePayload
+        });
+    }
+
+    async function decryptBundleWithVaultKey(bundlePayload, vaultKey) {
+        return runDecryptWorker({
+            mode: 'vaultKey',
+            vaultKey,
+            bundlePayload
+        });
     }
 
     function unpackArchive(archiveBytes) {
@@ -324,6 +499,15 @@
         });
     }
 
+    function removeDocumentIcons(doc) {
+        doc.querySelectorAll('link[rel]').forEach(link => {
+            const relation = (link.getAttribute('rel') || '').toLowerCase();
+            if (relation.includes('icon')) {
+                link.remove();
+            }
+        });
+    }
+
     function buildViewerUrl(record, fileMap) {
         const meta = readVaultMeta(fileMap);
         const entryPath = normalizeBundlePath(meta.entry);
@@ -369,6 +553,7 @@
 
         const doc = new DOMParser().parseFromString(textDecoder.decode(entryBytes), 'text/html');
         rewriteDocumentResources(doc, entryPath, createResourceUrl);
+        removeDocumentIcons(doc);
 
         if (!doc.querySelector('title')) {
             const title = doc.createElement('title');
@@ -390,13 +575,15 @@
     }
 
     function writeViewerPlaceholder(viewerWindow, label) {
+        const escapedLabel = escapeHtml(label);
+
         viewerWindow.document.open();
         viewerWindow.document.write(`<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unlocking ${label}</title>
+    <title>Unlocking ${escapedLabel}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -494,7 +681,7 @@
 </head>
 <body>
     <main>
-        <h1>${label}</h1>
+        <h1>${escapedLabel}</h1>
         <p class="description">Your archive is being decrypted locally and prepared in a new browser tab.</p>
         <section class="card" aria-label="Archive status">
             <div class="status">
@@ -506,6 +693,20 @@
 </body>
 </html>`);
         viewerWindow.document.close();
+    }
+
+    function openViewerWindow() {
+        const viewerWindow = window.open('', '_blank');
+
+        if (viewerWindow) {
+            try {
+                viewerWindow.opener = null;
+            } catch (error) {
+                // Some browsers restrict opener writes; the viewer still opens normally.
+            }
+        }
+
+        return viewerWindow;
     }
 
     async function fetchBundlePayload(record) {
@@ -532,6 +733,953 @@
         }
     }
 
+    function canAttemptPersistentDevicePass() {
+        return Boolean(
+            window.isSecureContext &&
+            window.crypto &&
+            window.crypto.subtle &&
+            window.indexedDB
+        );
+    }
+
+    function canAttemptPasskeyPrf() {
+        return Boolean(
+            window.isSecureContext &&
+            getPasskeyRpId() &&
+            window.PublicKeyCredential &&
+            navigator.credentials &&
+            typeof navigator.credentials.create === 'function' &&
+            typeof navigator.credentials.get === 'function' &&
+            window.crypto &&
+            window.crypto.subtle
+        );
+    }
+
+    function configureDevicePassOption(bundlePayload = null, options = {}) {
+        if (!devicePassInput || !devicePassOption) return;
+
+        const { resetChoice = true } = options;
+        const isV3Bundle = !bundlePayload || bundlePayload.version === 3;
+        const isAvailable = canAttemptPersistentDevicePass() && isV3Bundle;
+        const hasPasskeyPrfAttempt = canAttemptPasskeyPrf();
+        const rpId = getPasskeyRpId();
+
+        devicePassInput.disabled = !isAvailable;
+        if (resetChoice || !isAvailable) {
+            devicePassInput.checked = isAvailable;
+        }
+        devicePassOption.classList.toggle('is-disabled', !isAvailable);
+        devicePassOption.title = isAvailable
+            ? 'Bind this vault to an encrypted local device ticket after the token unlock succeeds.'
+            : rpId
+                ? 'Persistent device tickets require a secure context, IndexedDB, and Web Crypto.'
+                : 'Persistent Passkey tickets require a domain origin. Use localhost or the GitHub Pages HTTPS domain instead of 127.0.0.1.';
+
+        if (devicePassDetail) {
+            devicePassDetail.textContent = isAvailable
+                ? hasPasskeyPrfAttempt
+                    ? 'Passkey unlock stays saved on this device; fallback local tickets last 5 uses or 24 hours.'
+                    : 'Local fallback unlock lasts up to 5 times or 24 hours.'
+                : rpId
+                    ? 'This browser will fall back to session-only access if persistent local storage is unavailable.'
+                    : 'Use localhost or the GitHub Pages HTTPS domain; IP origins only get session access.';
+        }
+    }
+
+    function getSavedPasskeyTicket(record) {
+        const ticketRecord = record ? state.deviceTickets.get(record.id) : null;
+        return ticketRecord && ticketRecord.protection === 'passkey-prf'
+            ? ticketRecord
+            : null;
+    }
+
+    function configureSavedPasskeyOption(record = state.activeRecord, mode = 'token') {
+        if (!savedPasskeyOption) return;
+
+        const ticketRecord = getSavedPasskeyTicket(record);
+        const isVisible = mode === 'token' && Boolean(ticketRecord);
+
+        savedPasskeyOption.hidden = !isVisible;
+
+        if (savedPasskeyButton) {
+            savedPasskeyButton.disabled = state.unlocking || !isVisible;
+        }
+
+        if (savedPasskeyDetail && isVisible) {
+            savedPasskeyDetail.textContent = 'Saved Passkey unlock is available. Windows Security opens only after you choose Use saved Passkey.';
+        }
+    }
+
+    function openDevicePassDb() {
+        if (state.devicePassDb) {
+            return Promise.resolve(state.devicePassDb);
+        }
+
+        if (state.devicePassDbReady) {
+            return state.devicePassDbReady;
+        }
+
+        if (!window.indexedDB) {
+            return Promise.reject(new Error('IndexedDB is unavailable.'));
+        }
+
+        const ready = new Promise((resolve, reject) => {
+            const request = window.indexedDB.open(devicePassDbName, 2);
+            const rejectOpen = error => {
+                state.devicePassDbReady = null;
+                reject(error);
+            };
+
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                if (!db.objectStoreNames.contains(devicePassStoreName)) {
+                    db.createObjectStore(devicePassStoreName, { keyPath: 'taskId' });
+                }
+                if (!db.objectStoreNames.contains(devicePassKeyStoreName)) {
+                    db.createObjectStore(devicePassKeyStoreName, { keyPath: 'keyId' });
+                }
+            };
+
+            request.onsuccess = () => {
+                state.devicePassDb = request.result;
+                state.devicePassDb.addEventListener('versionchange', () => {
+                    state.devicePassDb.close();
+                    state.devicePassDb = null;
+                    state.devicePassDbReady = null;
+                });
+                state.devicePassDb.addEventListener('close', () => {
+                    state.devicePassDb = null;
+                    state.devicePassDbReady = null;
+                });
+                resolve(state.devicePassDb);
+            };
+
+            request.onerror = () => {
+                rejectOpen(request.error || new Error('Device ticket storage failed to open.'));
+            };
+
+            request.onblocked = () => {
+                rejectOpen(new Error('Device ticket storage is blocked by another open tab.'));
+            };
+        });
+
+        state.devicePassDbReady = ready;
+        return state.devicePassDbReady;
+    }
+
+    async function runDevicePassTransaction(mode, callback) {
+        const db = await openDevicePassDb();
+
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(devicePassStoreName, mode);
+            const store = transaction.objectStore(devicePassStoreName);
+            const result = callback(store);
+
+            transaction.oncomplete = () => resolve(result);
+            transaction.onerror = () => reject(transaction.error || new Error('Device ticket storage failed.'));
+            transaction.onabort = () => reject(transaction.error || new Error('Device ticket storage was aborted.'));
+        });
+    }
+
+    function readLocalDeviceTickets() {
+        try {
+            const payload = JSON.parse(window.localStorage.getItem(devicePassLocalStorageKey) || '[]');
+            return Array.isArray(payload) ? payload : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function writeLocalDeviceTickets(records) {
+        try {
+            window.localStorage.setItem(devicePassLocalStorageKey, JSON.stringify(records));
+        } catch (error) {
+            // IndexedDB remains the primary store.
+        }
+    }
+
+    function upsertLocalDeviceTicket(ticketRecord) {
+        const records = readLocalDeviceTickets().filter(record => record && record.taskId !== ticketRecord.taskId);
+        records.push(ticketRecord);
+        writeLocalDeviceTickets(records);
+    }
+
+    function deleteLocalDeviceTicket(taskId) {
+        writeLocalDeviceTickets(readLocalDeviceTickets().filter(record => record && record.taskId !== taskId));
+    }
+
+    function readPasskeyCredentialRecord() {
+        try {
+            const record = JSON.parse(window.localStorage.getItem(devicePassCredentialStorageKey) || 'null');
+            return record && record.credentialId ? record : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writePasskeyCredentialRecord(credentialId) {
+        try {
+            window.localStorage.setItem(devicePassCredentialStorageKey, JSON.stringify({
+                credentialId,
+                scope: 'origin',
+                updatedAt: Date.now()
+            }));
+        } catch (error) {
+            // Task tickets still carry the credential id as a fallback source.
+        }
+    }
+
+    function getSavedPasskeyCredentialId() {
+        const storedCredential = readPasskeyCredentialRecord();
+        if (storedCredential?.credentialId) {
+            return storedCredential.credentialId;
+        }
+
+        for (const ticketRecord of state.deviceTickets.values()) {
+            if (ticketRecord?.protection === 'passkey-prf' && ticketRecord.credentialId) {
+                return ticketRecord.credentialId;
+            }
+        }
+
+        return '';
+    }
+
+    function getDeviceTicketTimestamp(record) {
+        return record && Number.isFinite(record.updatedAt || record.createdAt)
+            ? record.updatedAt || record.createdAt
+            : 0;
+    }
+
+    function mergeLoadedDeviceTicket(record) {
+        if (!record || !record.taskId || !record.ticket) return;
+
+        const current = state.deviceTickets.get(record.taskId);
+        if (!current || getDeviceTicketTimestamp(record) >= getDeviceTicketTimestamp(current)) {
+            state.deviceTickets.set(record.taskId, record);
+        }
+    }
+
+    async function persistLoadedTicketsToIndexedDb() {
+        if (!window.indexedDB || !state.deviceTickets.size) return;
+
+        try {
+            await runDevicePassTransaction('readwrite', store => {
+                for (const record of state.deviceTickets.values()) {
+                    store.put(record);
+                }
+            });
+        } catch (error) {
+            // LocalStorage mirror remains available.
+        }
+    }
+
+    async function loadDeviceTickets() {
+        state.deviceTickets.clear();
+
+        for (const record of readLocalDeviceTickets()) {
+            mergeLoadedDeviceTicket(record);
+        }
+
+        if (!window.indexedDB) return;
+
+        try {
+            await runDevicePassTransaction('readonly', store => {
+                const request = store.getAll();
+
+                request.onsuccess = () => {
+                    for (const record of request.result || []) {
+                        mergeLoadedDeviceTicket(record);
+                    }
+                };
+            });
+            writeLocalDeviceTickets([...state.deviceTickets.values()]);
+        } catch (error) {
+            await persistLoadedTicketsToIndexedDb();
+        }
+    }
+
+    async function saveDeviceTicket(ticketRecord) {
+        const previousTicket = state.deviceTickets.get(ticketRecord.taskId);
+
+        state.deviceTickets.set(ticketRecord.taskId, ticketRecord);
+        upsertLocalDeviceTicket(ticketRecord);
+
+        let indexedDbWriteSucceeded = false;
+
+        try {
+            await runDevicePassTransaction('readwrite', store => {
+                store.put(ticketRecord);
+            });
+            indexedDbWriteSucceeded = true;
+        } catch (error) {
+            console.warn('IndexedDB device ticket write failed; localStorage mirror is still available:', error);
+        }
+
+        if (
+            indexedDbWriteSucceeded &&
+            previousTicket &&
+            previousTicket.keyId &&
+            previousTicket.keyId !== ticketRecord.keyId
+        ) {
+            await deleteLocalDeviceKey(previousTicket.keyId);
+        }
+
+        renderProjects();
+    }
+
+    async function deleteDeviceTicket(taskId) {
+        const ticketRecord = state.deviceTickets.get(taskId);
+        state.deviceTickets.delete(taskId);
+        deleteLocalDeviceTicket(taskId);
+
+        if (!window.indexedDB) {
+            renderProjects();
+            return;
+        }
+
+        try {
+            await runDevicePassTransaction('readwrite', store => {
+                store.delete(taskId);
+            });
+            if (ticketRecord && ticketRecord.keyId) {
+                await deleteLocalDeviceKey(ticketRecord.keyId);
+            }
+        } catch (error) {
+            // The in-memory ticket state was already cleared.
+        }
+
+        renderProjects();
+    }
+
+    async function getLocalDeviceKey(keyId) {
+        if (!window.indexedDB) {
+            return null;
+        }
+
+        const db = await openDevicePassDb();
+
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(devicePassKeyStoreName, 'readonly');
+            const request = transaction.objectStore(devicePassKeyStoreName).get(keyId);
+
+            request.onsuccess = () => {
+                const record = request.result;
+                resolve(record && record.key ? record.key : null);
+            };
+            request.onerror = () => reject(request.error || new Error('Local device key could not be read.'));
+            transaction.onerror = () => reject(transaction.error || new Error('Local device key transaction failed.'));
+        });
+    }
+
+    async function saveLocalDeviceKey(keyId, key) {
+        const db = await openDevicePassDb();
+
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(devicePassKeyStoreName, 'readwrite');
+            transaction.objectStore(devicePassKeyStoreName).put({
+                keyId,
+                key,
+                createdAt: Date.now()
+            });
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error || new Error('Local device key could not be saved.'));
+        });
+    }
+
+    async function deleteLocalDeviceKey(keyId) {
+        if (!window.indexedDB) return;
+
+        try {
+            const db = await openDevicePassDb();
+            await new Promise((resolve, reject) => {
+                const transaction = db.transaction(devicePassKeyStoreName, 'readwrite');
+                transaction.objectStore(devicePassKeyStoreName).delete(keyId);
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = () => reject(transaction.error || new Error('Local device key could not be deleted.'));
+            });
+        } catch (error) {
+            // Stale keys only matter if the encrypted ticket still exists.
+        }
+    }
+
+    async function createLocalDeviceKey(keyId) {
+        const key = await window.crypto.subtle.generateKey(
+            {
+                name: 'AES-GCM',
+                length: 256
+            },
+            false,
+            ['encrypt', 'decrypt']
+        );
+
+        await saveLocalDeviceKey(keyId, key);
+        return key;
+    }
+
+    function getTicketProtectorId(context) {
+        return context.credentialId || context.keyId || context.protectorId || 'unknown';
+    }
+
+    function getTicketAad(context) {
+        return textEncoder.encode([
+            'evo-vault-device-ticket-v1',
+            window.location.origin,
+            context.taskId,
+            context.bundleId,
+            context.protection || 'passkey-prf',
+            getTicketProtectorId(context)
+        ].join('|'));
+    }
+
+    function parseDeviceTicket(ticket) {
+        const parts = String(ticket || '').split('.');
+
+        if (parts.length !== 4 || parts[0] !== devicePassTicketPrefix) {
+            throw new Error('Device ticket is invalid.');
+        }
+
+        return {
+            salt: base64urlToBytes(parts[1]),
+            iv: base64urlToBytes(parts[2]),
+            ciphertext: base64urlToBytes(parts[3])
+        };
+    }
+
+    function encodeDeviceTicket({ salt, iv, ciphertext }) {
+        return [
+            devicePassTicketPrefix,
+            bytesToBase64url(salt),
+            bytesToBase64url(iv),
+            bytesToBase64url(ciphertext)
+        ].join('.');
+    }
+
+    async function deriveTicketKey(prfOutput, { taskId, bundleId, credentialId }) {
+        const baseKey = await window.crypto.subtle.importKey(
+            'raw',
+            prfOutput,
+            'HKDF',
+            false,
+            ['deriveKey']
+        );
+
+        return window.crypto.subtle.deriveKey(
+            {
+                name: 'HKDF',
+                hash: 'SHA-256',
+                salt: textEncoder.encode(`${window.location.origin}|${taskId}|${bundleId}`),
+                info: textEncoder.encode(`evo-vault-device-ticket-key|${credentialId}`)
+            },
+            baseKey,
+            {
+                name: 'AES-GCM',
+                length: 256
+            },
+            false,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    async function encryptDeviceTicketPayloadWithKey(payload, context, salt, key) {
+        const iv = getRandomBytes(12);
+        const ciphertext = await window.crypto.subtle.encrypt(
+            {
+                name: 'AES-GCM',
+                iv,
+                additionalData: getTicketAad(context)
+            },
+            key,
+            textEncoder.encode(JSON.stringify(payload))
+        );
+
+        return encodeDeviceTicket({
+            salt,
+            iv,
+            ciphertext: new Uint8Array(ciphertext)
+        });
+    }
+
+    async function encryptDeviceTicketPayload(payload, context, salt, prfOutput) {
+        const key = await deriveTicketKey(prfOutput, context);
+        return encryptDeviceTicketPayloadWithKey(payload, context, salt, key);
+    }
+
+    async function decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key) {
+        const context = {
+            taskId: ticketRecord.taskId,
+            bundleId: getBundleId(bundlePayload),
+            credentialId: ticketRecord.credentialId,
+            keyId: ticketRecord.keyId,
+            protection: ticketRecord.protection || 'passkey-prf'
+        };
+        const ticket = parseDeviceTicket(ticketRecord.ticket);
+        const plaintext = await window.crypto.subtle.decrypt(
+            {
+                name: 'AES-GCM',
+                iv: ticket.iv,
+                additionalData: getTicketAad(context)
+            },
+            key,
+            ticket.ciphertext
+        );
+
+        return JSON.parse(textDecoder.decode(plaintext));
+    }
+
+    async function decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfOutput) {
+        const context = {
+            taskId: ticketRecord.taskId,
+            bundleId: getBundleId(bundlePayload),
+            credentialId: ticketRecord.credentialId,
+            protection: ticketRecord.protection || 'passkey-prf'
+        };
+        const key = await deriveTicketKey(prfOutput, context);
+
+        return decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key);
+    }
+
+    function getPublicKeyPrfResults(credential) {
+        const extensionResults = typeof credential.getClientExtensionResults === 'function'
+            ? credential.getClientExtensionResults()
+            : {};
+        const prf = extensionResults && extensionResults.prf;
+        const results = prf && prf.results;
+
+        return {
+            enabled: Boolean(prf && prf.enabled),
+            first: results && results.first ? new Uint8Array(results.first) : null,
+            second: results && results.second ? new Uint8Array(results.second) : null
+        };
+    }
+
+    function getErrorMessage(error) {
+        if (error instanceof Error) {
+            return error.name && error.name !== 'Error'
+                ? `${error.name}: ${error.message}`
+                : error.message;
+        }
+
+        return String(error || 'Unknown error.');
+    }
+
+    function getPasskeyPrfUnavailableReason() {
+        const reasons = [];
+
+        if (!window.isSecureContext) {
+            reasons.push('current page is not a secure context');
+        }
+        if (!getPasskeyRpId()) {
+            reasons.push('current host cannot be used as a Passkey RP ID');
+        }
+        if (!window.PublicKeyCredential) {
+            reasons.push('PublicKeyCredential is unavailable');
+        }
+        if (!navigator.credentials) {
+            reasons.push('navigator.credentials is unavailable');
+        } else {
+            if (typeof navigator.credentials.create !== 'function') {
+                reasons.push('navigator.credentials.create is unavailable');
+            }
+            if (typeof navigator.credentials.get !== 'function') {
+                reasons.push('navigator.credentials.get is unavailable');
+            }
+        }
+        if (!window.crypto || !window.crypto.subtle) {
+            reasons.push('Web Crypto SubtleCrypto is unavailable');
+        }
+
+        return reasons.length
+            ? reasons.join('; ')
+            : 'Passkey PRF preflight returned unavailable for an unknown reason';
+    }
+
+    async function getPasskeyPrfOutputs(credentialId, firstSalt, secondSalt = null) {
+        const rpId = getPasskeyRpId();
+        if (!rpId) {
+            throw new Error('Persistent Passkey tickets require localhost or an HTTPS domain, not an IP address.');
+        }
+
+        const evalRequest = { first: firstSalt };
+        if (secondSalt) {
+            evalRequest.second = secondSalt;
+        }
+
+        const credential = await navigator.credentials.get({
+            publicKey: {
+                challenge: getRandomBytes(32),
+                rpId,
+                allowCredentials: [
+                    {
+                        id: base64urlToBytes(credentialId),
+                        type: 'public-key'
+                    }
+                ],
+                userVerification: 'required',
+                extensions: {
+                    prf: {
+                        evalByCredential: {
+                            [credentialId]: evalRequest
+                        }
+                    }
+                },
+                timeout: 60000
+            }
+        });
+
+        if (!credential) {
+            throw new Error('Passkey verification was cancelled.');
+        }
+
+        const prfResults = getPublicKeyPrfResults(credential);
+        if (!prfResults.first) {
+            throw new Error('This Passkey does not expose PRF output.');
+        }
+
+        return prfResults;
+    }
+
+    async function createPasskeyPrfCredential(firstSalt) {
+        const rpId = getPasskeyRpId();
+        if (!rpId) {
+            throw new Error('Persistent Passkey tickets require localhost or an HTTPS domain, not an IP address.');
+        }
+
+        const credential = await navigator.credentials.create({
+            publicKey: {
+                challenge: getRandomBytes(32),
+                rp: {
+                    id: rpId,
+                    name: 'EvoVault'
+                },
+                user: {
+                    id: getRandomBytes(16),
+                    name: `evo-vault-${Date.now()}`,
+                    displayName: 'EvoVault Device Pass'
+                },
+                pubKeyCredParams: [
+                    { type: 'public-key', alg: -7 },
+                    { type: 'public-key', alg: -257 }
+                ],
+                authenticatorSelection: {
+                    residentKey: 'preferred',
+                    userVerification: 'required'
+                },
+                attestation: 'none',
+                extensions: {
+                    prf: {
+                        eval: {
+                            first: firstSalt
+                        }
+                    }
+                },
+                timeout: 60000
+            }
+        });
+
+        if (!credential) {
+            throw new Error('Passkey creation was cancelled.');
+        }
+
+        const credentialId = bytesToBase64url(new Uint8Array(credential.rawId));
+        let prfResults = getPublicKeyPrfResults(credential);
+
+        if (!prfResults.first) {
+            try {
+                prfResults = await getPasskeyPrfOutputs(credentialId, firstSalt);
+            } catch (error) {
+                if (prfResults.enabled === false && error instanceof Error && error.message === 'This Passkey does not expose PRF output.') {
+                    throw new Error('This Passkey does not support encrypted device tickets.');
+                }
+
+                throw error;
+            }
+        }
+
+        if (!prfResults.first) {
+            throw new Error('This Passkey does not expose PRF output.');
+        }
+
+        return {
+            credentialId,
+            prfOutput: prfResults.first
+        };
+    }
+
+    async function getOrCreatePasskeyPrfForTicket(firstSalt) {
+        const existingCredentialId = getSavedPasskeyCredentialId();
+
+        if (existingCredentialId) {
+            const prfResults = await getPasskeyPrfOutputs(existingCredentialId, firstSalt);
+            writePasskeyCredentialRecord(existingCredentialId);
+
+            return {
+                credentialId: existingCredentialId,
+                prfOutput: prfResults.first,
+                reusedCredential: true
+            };
+        }
+
+        const result = await createPasskeyPrfCredential(firstSalt);
+        writePasskeyCredentialRecord(result.credentialId);
+
+        return {
+            ...result,
+            reusedCredential: false
+        };
+    }
+
+    async function createDeviceTicket(record, bundlePayload, vaultKey) {
+        if (!canAttemptPersistentDevicePass() || !vaultKey || !bundlePayload || bundlePayload.version !== 3) {
+            throw new Error('Persistent device tickets are unavailable in this browser.');
+        }
+
+        if (canAttemptPasskeyPrf()) {
+            if (await isPasskeyPrfExplicitlyUnavailable()) {
+                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey);
+                return {
+                    ...fallbackResult,
+                    prfAttempted: false,
+                    prfSucceeded: false,
+                    prfUnavailableReason: 'Passkey PRF is explicitly unavailable in this browser.'
+                };
+            }
+
+            try {
+                return await createPasskeyDeviceTicket(record, bundlePayload, vaultKey);
+            } catch (error) {
+                const prfFailureReason = getErrorMessage(error);
+                console.warn('Passkey PRF ticket failed; falling back to local CryptoKey ticket:', error);
+                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey);
+
+                return {
+                    ...fallbackResult,
+                    prfAttempted: true,
+                    prfSucceeded: false,
+                    prfFailureReason
+                };
+            }
+        }
+
+        const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey);
+
+        return {
+            ...fallbackResult,
+            prfAttempted: false,
+            prfSucceeded: false,
+            prfUnavailableReason: getPasskeyPrfUnavailableReason()
+        };
+    }
+
+    async function createPasskeyDeviceTicket(record, bundlePayload, vaultKey) {
+        const salt = getRandomBytes(32);
+        const { credentialId, prfOutput, reusedCredential } = await getOrCreatePasskeyPrfForTicket(salt);
+        const now = Date.now();
+        const bundleId = getBundleId(bundlePayload);
+        const context = {
+            taskId: record.id,
+            bundleId,
+            credentialId,
+            protection: 'passkey-prf'
+        };
+        const payload = {
+            version: 1,
+            taskId: record.id,
+            bundleId,
+            vaultKey: bytesToBase64url(vaultKey),
+            authorization: 'permanent',
+            createdAt: now,
+            lastUsedAt: now,
+            counter: 0
+        };
+        const ticket = await encryptDeviceTicketPayload(payload, context, salt, prfOutput);
+
+        await saveDeviceTicket({
+            version: 1,
+            protection: 'passkey-prf',
+            authorization: 'permanent',
+            credentialScope: 'origin',
+            taskId: record.id,
+            bundleId,
+            credentialId,
+            ticket,
+            createdAt: now,
+            updatedAt: now
+        });
+
+        return {
+            protection: 'passkey-prf',
+            prfAttempted: true,
+            prfSucceeded: true,
+            credentialReused: reusedCredential,
+            credentialId
+        };
+    }
+
+    async function createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey) {
+        const now = Date.now();
+        const bundleId = getBundleId(bundlePayload);
+        const keyId = `local:${record.id}:${bundleId}`;
+        const key = await createLocalDeviceKey(keyId);
+        const salt = getRandomBytes(16);
+        const context = {
+            taskId: record.id,
+            bundleId,
+            keyId,
+            protection: 'local-crypto-key'
+        };
+        const payload = {
+            version: 1,
+            taskId: record.id,
+            bundleId,
+            vaultKey: bytesToBase64url(vaultKey),
+            usesRemaining: devicePassMaxUses,
+            maxUses: devicePassMaxUses,
+            createdAt: now,
+            lastUsedAt: now,
+            expiresAt: now + devicePassTtlMs,
+            counter: 0
+        };
+        const ticket = await encryptDeviceTicketPayloadWithKey(payload, context, salt, key);
+
+        await saveDeviceTicket({
+            version: 1,
+            protection: 'local-crypto-key',
+            taskId: record.id,
+            bundleId,
+            keyId,
+            ticket,
+            createdAt: now,
+            updatedAt: now
+        });
+
+        return {
+            protection: 'local-crypto-key',
+            prfAttempted: false,
+            prfSucceeded: false,
+            keyId
+        };
+    }
+
+    function validateDeviceTicketPayload(payload, ticketRecord, bundlePayload) {
+        const now = Date.now();
+
+        if (!payload || payload.version !== 1 || payload.taskId !== ticketRecord.taskId || payload.bundleId !== getBundleId(bundlePayload)) {
+            throw new Error('Device ticket does not match this archive.');
+        }
+
+        if (!payload.vaultKey) {
+            throw new Error('Device ticket is missing the vault key.');
+        }
+
+        if (ticketRecord.protection !== 'local-crypto-key') {
+            return;
+        }
+
+        if (!Number.isFinite(payload.usesRemaining) || payload.usesRemaining <= 0) {
+            throw new Error('Device ticket has no remaining unlocks.');
+        }
+
+        if (!Number.isFinite(payload.expiresAt) || now > payload.expiresAt) {
+            throw new Error('Device ticket has expired.');
+        }
+
+        if (Number.isFinite(payload.lastUsedAt) && now + devicePassClockSkewMs < payload.lastUsedAt) {
+            throw new Error('Device clock moved backwards. Re-enter the token.');
+        }
+    }
+
+    async function unlockWithDeviceTicket(record, bundlePayload, ticketRecord) {
+        if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload) || bundlePayload.version !== 3) {
+            throw new Error('Device ticket is stale.');
+        }
+
+        if (ticketRecord.protection === 'local-crypto-key') {
+            return unlockWithLocalCryptoTicket(record, bundlePayload, ticketRecord);
+        }
+
+        const currentTicket = parseDeviceTicket(ticketRecord.ticket);
+        const nextSalt = getRandomBytes(32);
+        const prfResults = await getPasskeyPrfOutputs(ticketRecord.credentialId, currentTicket.salt, nextSalt);
+        const payload = await decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfResults.first);
+
+        validateDeviceTicketPayload(payload, ticketRecord, bundlePayload);
+
+        const now = Date.now();
+        const vaultKey = base64urlToBytes(payload.vaultKey);
+        const nextPayload = {
+            ...payload,
+            authorization: 'permanent',
+            lastUsedAt: now,
+            counter: Number.isFinite(payload.counter) ? payload.counter + 1 : 1
+        };
+        const nextRecord = {
+            ...ticketRecord,
+            authorization: 'permanent',
+            ticket: await encryptDeviceTicketPayload(
+                nextPayload,
+                {
+                    taskId: record.id,
+                    bundleId: getBundleId(bundlePayload),
+                    credentialId: ticketRecord.credentialId,
+                    protection: 'passkey-prf'
+                },
+                prfResults.second ? nextSalt : currentTicket.salt,
+                prfResults.second || prfResults.first
+            ),
+            updatedAt: now
+        };
+
+        await saveDeviceTicket(nextRecord);
+
+        return vaultKey;
+    }
+
+    async function unlockWithLocalCryptoTicket(record, bundlePayload, ticketRecord) {
+        const key = await getLocalDeviceKey(ticketRecord.keyId);
+        if (!key) {
+            throw new Error('Local device key is missing.');
+        }
+
+        const currentTicket = parseDeviceTicket(ticketRecord.ticket);
+        const payload = await decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key);
+
+        validateDeviceTicketPayload(payload, ticketRecord, bundlePayload);
+
+        const now = Date.now();
+        const vaultKey = base64urlToBytes(payload.vaultKey);
+        const remainingUses = payload.usesRemaining - 1;
+
+        if (remainingUses > 0) {
+            const nextPayload = {
+                ...payload,
+                usesRemaining: remainingUses,
+                lastUsedAt: now,
+                counter: payload.counter + 1
+            };
+            const nextRecord = {
+                ...ticketRecord,
+                ticket: await encryptDeviceTicketPayloadWithKey(
+                    nextPayload,
+                    {
+                        taskId: record.id,
+                        bundleId: getBundleId(bundlePayload),
+                        keyId: ticketRecord.keyId,
+                        protection: 'local-crypto-key'
+                    },
+                    currentTicket.salt,
+                    key
+                ),
+                updatedAt: now
+            };
+
+            await saveDeviceTicket(nextRecord);
+        } else {
+            await deleteDeviceTicket(record.id);
+        }
+
+        return vaultKey;
+    }
+
     function setTokenStatus(message, tone = '') {
         if (!tokenStatus) return;
 
@@ -550,6 +1698,299 @@
         if (tokenSubmit) tokenSubmit.disabled = isBusy;
         if (tokenCancel) tokenCancel.disabled = isBusy;
         if (tokenClose) tokenClose.disabled = isBusy;
+        if (savedPasskeyButton) savedPasskeyButton.disabled = isBusy;
+        if (devicePassInput) devicePassInput.disabled = isBusy || !canAttemptPersistentDevicePass();
+    }
+
+    function setTokenPromptMode(mode, record = state.activeRecord) {
+        const isSaveDeviceMode = mode === 'saveDevice';
+        const isOpenRecordMode = mode === 'openRecord';
+        const isPostTokenMode = isSaveDeviceMode || isOpenRecordMode;
+
+        tokenPanel?.setAttribute('data-mode', mode);
+        configureSavedPasskeyOption(record, mode);
+
+        if (tokenField) tokenField.hidden = isPostTokenMode;
+        if (tokenLabel) tokenLabel.hidden = isPostTokenMode;
+        if (devicePassOption) devicePassOption.hidden = isPostTokenMode;
+
+        if (tokenInput) {
+            tokenInput.required = !isPostTokenMode;
+            if (isPostTokenMode) {
+                tokenInput.blur();
+            }
+        }
+
+        if (tokenTitle) {
+            tokenTitle.textContent = isOpenRecordMode
+                ? 'Open record'
+                : isSaveDeviceMode ? 'Save device access?' : 'Enter your token';
+        }
+
+        if (tokenDescription) {
+            tokenDescription.textContent = isOpenRecordMode
+                ? 'Device access is saved. Open the record in a new tab to continue.'
+                : isSaveDeviceMode
+                    ? 'Save a Passkey for this record. Windows Security may ask you to confirm; if it cannot complete, this browser will save an encrypted local device ticket instead.'
+                : record
+                    ? `Use the access token for ${record.label}. A successful unlock can create an encrypted local device ticket.`
+                    : 'Use the access token for this record. The archive is decrypted locally in your browser and opened in a new tab.';
+        }
+
+        if (tokenSubmit) {
+            tokenSubmit.textContent = isOpenRecordMode
+                ? 'Open record'
+                : isSaveDeviceMode ? 'Save Passkey' : 'Continue with token';
+        }
+
+        if (tokenCancel) {
+            tokenCancel.textContent = isOpenRecordMode
+                ? 'Close'
+                : isSaveDeviceMode ? 'Skip' : 'Back';
+        }
+
+        if (tokenNote) {
+            tokenNote.textContent = isOpenRecordMode
+                ? 'The next click opens the decrypted record from this browser session.'
+                : isSaveDeviceMode
+                    ? 'This happens after the token has been verified, so a failed Passkey attempt will not block opening the record.'
+                : defaultTokenNote;
+        }
+    }
+
+    function showDeviceSavePrompt(pendingUnlock) {
+        state.pendingUnlock = pendingUnlock;
+        setTokenPromptMode('saveDevice', pendingUnlock.record);
+        setTokenStatus('Token accepted. Save this device for faster local unlocks.', 'success');
+
+        window.setTimeout(() => {
+            tokenSubmit?.focus({ preventScroll: true });
+        }, reduceMotion ? 0 : 120);
+    }
+
+    function openPendingViewerWindow(pendingUnlock) {
+        if (pendingUnlock.viewerWindow) {
+            try {
+                if (!pendingUnlock.viewerWindow.closed) {
+                    return pendingUnlock.viewerWindow;
+                }
+            } catch (error) {
+                return pendingUnlock.viewerWindow;
+            }
+        }
+
+        const viewerWindow = openViewerWindow();
+        if (!viewerWindow) {
+            return null;
+        }
+
+        writeViewerPlaceholder(viewerWindow, pendingUnlock.record.label);
+        pendingUnlock.viewerWindow = viewerWindow;
+        return viewerWindow;
+    }
+
+    function completePendingUnlock(options = {}) {
+        const { rememberInSession = false } = options;
+        const pendingUnlock = state.pendingUnlock;
+
+        if (!pendingUnlock) return;
+
+        const viewerWindow = openPendingViewerWindow(pendingUnlock);
+        if (!viewerWindow) {
+            setTokenStatus('Popup blocked. Allow popups for this site first, then try again.', 'error');
+            return;
+        }
+
+        state.pendingUnlock = null;
+
+        if (rememberInSession && pendingUnlock.vaultKey) {
+            setSessionVaultKey(pendingUnlock.record, pendingUnlock.bundlePayload, pendingUnlock.vaultKey);
+        }
+
+        viewerWindow.location.replace(pendingUnlock.viewerUrl);
+        setTokenStatus('Record unsealed. Opening in a new tab...', 'success');
+        closeTokenPrompt({ restorePanelFocus: false });
+        closeProjects({ restorePageFocus: false });
+    }
+
+    function skipPendingDeviceAccess() {
+        if (!state.pendingUnlock || state.unlocking) {
+            closeTokenPrompt();
+            return;
+        }
+
+        completePendingUnlock({ rememberInSession: true });
+    }
+
+    function finishDeviceTicketSave(pendingUnlock, ticketResult) {
+        setTokenStatus(
+            ticketResult.protection === 'passkey-prf'
+                ? 'Passkey device ticket saved. Opening record...'
+                : 'Local device ticket saved. Opening record...',
+            'success'
+        );
+        pendingUnlock.readyToOpen = true;
+        setTokenPromptMode('openRecord', pendingUnlock.record);
+        setTokenStatus('Device access saved. Click Open record to continue.', 'success');
+        window.setTimeout(() => {
+            tokenSubmit?.focus({ preventScroll: true });
+        }, reduceMotion ? 0 : 120);
+    }
+
+    async function savePendingDeviceAccess(event) {
+        event.preventDefault();
+
+        const pendingUnlock = state.pendingUnlock;
+        if (!pendingUnlock) return;
+
+        setUnlockBusy(true);
+        setTokenStatus(
+            canAttemptPasskeyPrf()
+                ? 'Opening Windows Security...'
+                : 'Saving encrypted local device ticket...',
+            'success'
+        );
+
+        try {
+            const ticketResult = await createDeviceTicket(
+                pendingUnlock.record,
+                pendingUnlock.bundlePayload,
+                pendingUnlock.vaultKey
+            );
+
+            finishDeviceTicketSave(pendingUnlock, ticketResult);
+        } catch (error) {
+            console.warn('Device ticket creation failed:', error);
+            const reason = getErrorMessage(error);
+            setTokenStatus(`Device ticket was not saved: ${reason} You can try again or skip.`, 'error');
+        } finally {
+            setUnlockBusy(false);
+        }
+    }
+
+    function completePendingSavedAccess() {
+        const pendingSavedAccess = state.pendingSavedAccess;
+        if (!pendingSavedAccess || !pendingSavedAccess.viewerUrl) return;
+
+        const viewerWindow = openViewerWindow();
+        if (!viewerWindow) {
+            setTokenStatus('Popup blocked. Allow popups for this site first, then try again.', 'error');
+            return;
+        }
+
+        writeViewerPlaceholder(viewerWindow, pendingSavedAccess.record.label);
+        viewerWindow.location.replace(pendingSavedAccess.viewerUrl);
+
+        state.pendingSavedAccess = null;
+        setTokenStatus('Record unsealed. Opening in a new tab...', 'success');
+        closeTokenPrompt({ restorePanelFocus: false });
+        closeProjects({ restorePageFocus: false });
+    }
+
+    async function useSavedPasskeyAccess(event) {
+        event.preventDefault();
+
+        const record = state.activeRecord;
+        if (!record || !getSavedPasskeyTicket(record)) return;
+
+        setUnlockBusy(true);
+        setTokenStatus('Opening Windows Security...', 'success');
+
+        try {
+            const bundlePayload = await fetchBundlePayload(record);
+            const ticketRecord = state.deviceTickets.get(record.id);
+
+            if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload)) {
+                await deleteDeviceTicket(record.id);
+                throw new Error('Saved Passkey access is no longer available.');
+            }
+
+            let vaultKey;
+            try {
+                vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord);
+            } catch (error) {
+                if (!(error && error.name === 'NotAllowedError')) {
+                    await deleteDeviceTicket(record.id);
+                }
+
+                throw error;
+            }
+
+            const unlockResult = await decryptBundleWithVaultKey(bundlePayload, vaultKey);
+            const fileMap = unpackArchive(unlockResult.archiveBytes);
+
+            state.pendingSavedAccess = {
+                record,
+                bundlePayload,
+                viewerUrl: buildViewerUrl(record, fileMap),
+                readyToOpen: true
+            };
+
+            setTokenPromptMode('openRecord', record);
+            setTokenStatus('Saved Passkey verified. Click Open record to continue.', 'success');
+            window.setTimeout(() => {
+                tokenSubmit?.focus({ preventScroll: true });
+            }, reduceMotion ? 0 : 120);
+        } catch (error) {
+            console.warn('Saved Passkey access failed:', error);
+            const reason = getErrorMessage(error);
+
+            setTokenStatus(`Saved Passkey failed: ${reason} Use the token to refresh access.`, 'error');
+            configureSavedPasskeyOption(record, 'token');
+        } finally {
+            setUnlockBusy(false);
+        }
+    }
+
+    function handleTokenCancel() {
+        if (state.pendingSavedAccess?.readyToOpen && !state.unlocking) {
+            closeTokenPrompt();
+            return;
+        }
+
+        if (state.pendingUnlock?.readyToOpen && !state.unlocking) {
+            closeTokenPrompt();
+            return;
+        }
+
+        if (state.pendingUnlock && !state.unlocking) {
+            skipPendingDeviceAccess();
+            return;
+        }
+
+        closeTokenPrompt();
+    }
+
+    function handleTokenClose() {
+        if (state.pendingSavedAccess && !state.unlocking) {
+            closeTokenPrompt();
+            return;
+        }
+
+        handleTokenCancel();
+    }
+
+    function handleTokenFormSubmit(event) {
+        if (state.pendingSavedAccess) {
+            if (state.pendingSavedAccess.readyToOpen) {
+                event.preventDefault();
+                completePendingSavedAccess();
+                return;
+            }
+        }
+
+        if (state.pendingUnlock) {
+            if (state.pendingUnlock.readyToOpen) {
+                event.preventDefault();
+                completePendingUnlock();
+                return;
+            }
+
+            savePendingDeviceAccess(event);
+            return;
+        }
+
+        unlockActiveRecord(event);
     }
 
     function restoreFocus() {
@@ -573,7 +2014,8 @@
     function getDialogFocusables(root) {
         if (!root) return [];
 
-        return [...root.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+        return [...root.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+            .filter(element => element.getClientRects().length > 0 || element === document.activeElement);
     }
 
     function closeTokenPrompt(options = {}) {
@@ -587,6 +2029,9 @@
 
         const finishClose = () => {
             tokenOverlay.hidden = true;
+            state.pendingUnlock = null;
+            state.pendingSavedAccess = null;
+            setTokenPromptMode('token', state.activeRecord);
             state.activeRecord = null;
             setTokenStatus('');
             if (tokenForm) tokenForm.reset();
@@ -609,17 +2054,20 @@
         const record = state.projects.find(project => project.id === recordId);
         if (!record) return;
 
+        state.pendingUnlock = null;
+        state.pendingSavedAccess = null;
         state.activeRecord = record;
-        tokenTitle.textContent = 'Enter your token';
         if (tokenMeta) {
             tokenMeta.textContent = `${record.label} · ${record.id.toUpperCase()}`;
         }
-        if (tokenDescription) {
-            tokenDescription.textContent = `Use the access token for ${record.label}. The archive is decrypted locally in your browser and opens in a new tab.`;
-        }
         setTokenStatus('');
         if (tokenForm) tokenForm.reset();
+        setTokenPromptMode('token', record);
         setUnlockBusy(false);
+        configureDevicePassOption();
+        if (canAttemptPasskeyPrf()) {
+            getPasskeyClientCapabilities();
+        }
 
         tokenOverlay.hidden = false;
         tokenOverlay.setAttribute('aria-hidden', 'false');
@@ -732,10 +2180,14 @@
         }
 
         state.projects.forEach((project, index) => {
+            const hasSavedAccess = state.sessionVaultKeys.has(project.id) || state.deviceTickets.has(project.id);
+
             appendRow({
                 label: project.label,
-                meta: project.state === 'sealed' ? 'Access token required to unlock locally' : 'Published archive',
-                access: project.state === 'sealed' ? 'Sealed' : 'Open',
+                meta: hasSavedAccess
+                    ? 'Saved device access is available in this browser'
+                    : project.state === 'sealed' ? 'Access token required to unlock locally' : 'Published archive',
+                access: hasSavedAccess ? 'Device pass' : project.state === 'sealed' ? 'Sealed' : 'Open',
                 actionLabel: 'Continue',
                 disabled: false,
                 taskId: project.id
@@ -756,6 +2208,7 @@
             const payload = await response.json();
             state.projects = Array.isArray(payload.tasks) ? payload.tasks : [];
             state.manifestError = '';
+            await loadDeviceTickets();
         } catch (error) {
             state.projects = [];
             state.manifestError = error instanceof Error ? error.message : 'Project archive manifest failed to load.';
@@ -796,6 +2249,10 @@
         if (!overlay || !overlay.classList.contains('is-open')) return;
 
         if (tokenOverlay && !tokenOverlay.hidden) {
+            if (state.pendingUnlock || state.pendingSavedAccess) {
+                handleTokenClose();
+                return;
+            }
             closeTokenPrompt({ restorePanelFocus: false });
         }
 
@@ -820,6 +2277,98 @@
         state.closeTimer = window.setTimeout(finishClose, 540);
     }
 
+    async function openViewerFromVaultKey(record, bundlePayload, vaultKey, viewerWindow, options = {}) {
+        const { rememberInSession = false } = options;
+        const unlockResult = await decryptBundleWithVaultKey(bundlePayload, vaultKey);
+        const fileMap = unpackArchive(unlockResult.archiveBytes);
+        const viewerUrl = buildViewerUrl(record, fileMap);
+
+        if (rememberInSession) {
+            setSessionVaultKey(record, bundlePayload, vaultKey);
+        }
+
+        viewerWindow.location.replace(viewerUrl);
+        closeTokenPrompt({ restorePanelFocus: false });
+        closeProjects({ restorePageFocus: false });
+    }
+
+    async function trySavedAccess(record, viewerWindow) {
+        const bundlePayload = await fetchBundlePayload(record);
+        const sessionVaultKey = getSessionVaultKey(record, bundlePayload);
+
+        if (sessionVaultKey) {
+            await openViewerFromVaultKey(record, bundlePayload, sessionVaultKey, viewerWindow);
+            return;
+        }
+
+        const ticketRecord = state.deviceTickets.get(record.id);
+        const hasMatchingTicket = ticketRecord && ticketRecord.bundleId === getBundleId(bundlePayload);
+
+        if (hasMatchingTicket) {
+            if (ticketRecord.protection === 'passkey-prf') {
+                throw new Error('Saved Passkey access requires confirmation.');
+            }
+
+            let vaultKey;
+            try {
+                vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord);
+            } catch (error) {
+                if (!(error && error.name === 'NotAllowedError')) {
+                    await deleteDeviceTicket(record.id);
+                }
+
+                throw error;
+            }
+
+            await openViewerFromVaultKey(record, bundlePayload, vaultKey, viewerWindow);
+            return;
+        }
+
+        throw new Error('No saved device access is available.');
+    }
+
+    async function openRecord(recordId) {
+        const record = state.projects.find(project => project.id === recordId);
+        if (!record) return;
+
+        const ticketRecord = state.deviceTickets.get(record.id);
+        const hasSessionAccess = state.sessionVaultKeys.has(record.id);
+        const hasSavedAccess = hasSessionAccess || Boolean(ticketRecord);
+
+        if (!hasSavedAccess) {
+            openTokenPrompt(record.id);
+            return;
+        }
+
+        if (!hasSessionAccess && ticketRecord?.protection === 'passkey-prf') {
+            openTokenPrompt(record.id);
+            setTokenStatus('Saved Passkey unlock is available below the token field.', 'success');
+            return;
+        }
+
+        const viewerWindow = openViewerWindow();
+        if (!viewerWindow) {
+            openTokenPrompt(record.id);
+            setTokenStatus('Popup blocked. Enter the token after allowing popups for this site.', 'error');
+            return;
+        }
+
+        writeViewerPlaceholder(viewerWindow, record.label);
+
+        try {
+            await trySavedAccess(record, viewerWindow);
+        } catch (error) {
+            viewerWindow.close();
+            if (ticketRecord?.protection === 'passkey-prf') {
+                openTokenPrompt(record.id);
+                setTokenStatus(error instanceof Error ? error.message : 'Saved Passkey access requires confirmation.', 'error');
+            } else {
+                openTokenPrompt(record.id);
+                setTokenStatus(error instanceof Error ? error.message : 'Saved access failed. Enter the token again.', 'error');
+            }
+        }
+    }
+
     async function unlockActiveRecord(event) {
         event.preventDefault();
 
@@ -832,28 +2381,66 @@
             return;
         }
 
-        const viewerWindow = window.open('', '_blank');
-        if (!viewerWindow) {
+        const shouldRememberDevice = Boolean(devicePassInput?.checked);
+        const shouldDeferViewerWindow = shouldRememberDevice && canAttemptPersistentDevicePass();
+        let viewerWindow = null;
+
+        if (!shouldDeferViewerWindow) {
+            viewerWindow = openViewerWindow();
+        }
+
+        if (!shouldDeferViewerWindow && !viewerWindow) {
             setTokenStatus('Popup blocked. Allow popups for this site first.', 'error');
             return;
         }
 
-        writeViewerPlaceholder(viewerWindow, state.activeRecord.label);
+        if (viewerWindow) {
+            writeViewerPlaceholder(viewerWindow, state.activeRecord.label);
+        }
+
         setUnlockBusy(true);
         setTokenStatus('Decrypting archive...', 'success');
 
         try {
             const bundlePayload = await fetchBundlePayload(state.activeRecord);
-            const archiveBytes = await decryptBundle(bundlePayload, token);
-            const fileMap = unpackArchive(archiveBytes);
+            configureDevicePassOption(bundlePayload, { resetChoice: false });
+
+            const unlockResult = await decryptBundleWithToken(bundlePayload, token);
+            const fileMap = unpackArchive(unlockResult.archiveBytes);
             const viewerUrl = buildViewerUrl(state.activeRecord, fileMap);
+
+            if (shouldRememberDevice && unlockResult.vaultKey && canAttemptPersistentDevicePass()) {
+                showDeviceSavePrompt({
+                    record: state.activeRecord,
+                    bundlePayload,
+                    vaultKey: unlockResult.vaultKey,
+                    viewerUrl,
+                    viewerWindow: null
+                });
+                return;
+            }
+
+            if (unlockResult.vaultKey) {
+                setSessionVaultKey(state.activeRecord, bundlePayload, unlockResult.vaultKey);
+            }
+
+            if (!viewerWindow) {
+                viewerWindow = openViewerWindow();
+                if (!viewerWindow) {
+                    setTokenStatus('Token accepted, but the browser blocked the new tab. Allow popups and try again.', 'error');
+                    return;
+                }
+                writeViewerPlaceholder(viewerWindow, state.activeRecord.label);
+            }
 
             viewerWindow.location.replace(viewerUrl);
             setTokenStatus('Record unsealed. Opening in a new tab...', 'success');
             closeTokenPrompt({ restorePanelFocus: false });
             closeProjects({ restorePageFocus: false });
         } catch (error) {
-            viewerWindow.close();
+            if (viewerWindow) {
+                viewerWindow.close();
+            }
             setTokenStatus(error instanceof Error ? error.message : 'Unable to unlock this record.', 'error');
             tokenInput.focus({ preventScroll: true });
             tokenInput.select();
@@ -865,7 +2452,7 @@
     function handleGlobalKeydown(event) {
         if (tokenOverlay && !tokenOverlay.hidden) {
             if (event.key === 'Escape' && !state.unlocking) {
-                closeTokenPrompt();
+                handleTokenClose();
                 return;
             }
         } else if (overlay && !overlay.hidden) {
@@ -918,17 +2505,18 @@
             const action = event.target.closest('.project-action[data-task-id]');
             if (!action || action.disabled) return;
 
-            openTokenPrompt(action.dataset.taskId);
+            openRecord(action.dataset.taskId);
         });
 
-        tokenClose?.addEventListener('click', () => closeTokenPrompt());
-        tokenCancel?.addEventListener('click', () => closeTokenPrompt());
+        tokenClose?.addEventListener('click', handleTokenClose);
+        tokenCancel?.addEventListener('click', handleTokenCancel);
         tokenOverlay?.addEventListener('click', event => {
             if (event.target === tokenOverlay && !state.unlocking) {
-                closeTokenPrompt();
+                handleTokenClose();
             }
         });
-        tokenForm?.addEventListener('submit', unlockActiveRecord);
+        savedPasskeyButton?.addEventListener('click', useSavedPasskeyAccess);
+        tokenForm?.addEventListener('submit', handleTokenFormSubmit);
 
         document.addEventListener('keydown', handleGlobalKeydown);
     }

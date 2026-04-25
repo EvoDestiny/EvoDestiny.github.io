@@ -516,7 +516,10 @@ body.modal-open .student-id {
     transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
-.token-field:focus-within {
+.token-field:focus-within,
+.saved-passkey-option:focus-within,
+.device-pass-option:focus-within,
+.device-pass-option:has(.device-pass-input:checked) {
     border-color: var(--card-focus);
     box-shadow: 0 0 0 4px var(--card-focus-shadow);
     background: #fff;
@@ -584,6 +587,102 @@ body.modal-open .student-id {
     color: var(--success);
     border-color: rgba(85, 102, 63, 0.18);
     background: rgba(85, 102, 63, 0.08);
+}
+
+.saved-passkey-option {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.9rem 0.95rem;
+    border: 1px solid var(--card-border);
+    border-radius: 0.95rem;
+    background: #fff;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.saved-passkey-option[hidden] {
+    display: none;
+}
+
+.saved-passkey-button {
+    min-height: 2.9rem;
+    border: 1px solid var(--card-border-strong);
+    border-radius: 0.85rem;
+    background: #fff;
+    color: var(--card-text);
+    font: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.saved-passkey-button:hover {
+    border-color: var(--card-focus);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(23, 22, 21, 0.08);
+}
+
+.saved-passkey-button:disabled {
+    cursor: wait;
+    opacity: 0.62;
+    transform: none;
+    box-shadow: none;
+}
+
+.saved-passkey-detail {
+    margin: 0;
+    color: var(--card-muted);
+    font-size: 0.82rem;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.device-pass-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.9rem 0.95rem;
+    border: 1px solid var(--card-border);
+    border-radius: 0.95rem;
+    background: #fff;
+    cursor: pointer;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, opacity 160ms ease;
+}
+
+.device-pass-option:hover {
+    border-color: var(--card-focus);
+}
+
+.device-pass-option.is-disabled {
+    cursor: default;
+    opacity: 0.62;
+}
+
+.device-pass-input {
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.2rem;
+    accent-color: var(--card-button);
+    flex: 0 0 auto;
+}
+
+.device-pass-copy {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.device-pass-title {
+    color: var(--card-text);
+    font-size: 0.94rem;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.device-pass-detail {
+    color: var(--card-muted);
+    font-size: 0.82rem;
+    line-height: 1.4;
 }
 
 .token-actions {
