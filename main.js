@@ -268,6 +268,12 @@
         renderProjects();
     }
 
+    function deleteSessionVaultKey(record) {
+        if (record && state.sessionVaultKeys.delete(record.id)) {
+            renderProjects();
+        }
+    }
+
     function isIpHostname(hostname) {
         return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.includes(':');
     }
@@ -793,6 +799,12 @@
             : null;
     }
 
+    function canUseSavedDeviceTicket(ticketRecord) {
+        if (!ticketRecord) return false;
+        if (ticketRecord.protection === 'passkey-prf') return true;
+        return ticketRecord.protection === 'local-crypto-key' && ticketRecord.rememberDeviceRequested === true;
+    }
+
     function configureSavedPasskeyOption(record = state.activeRecord, mode = 'token') {
         if (!savedPasskeyOption) return;
 
@@ -1049,6 +1061,13 @@
         }
 
         renderProjects();
+    }
+
+    async function deleteLocalFallbackTicket(record) {
+        const ticketRecord = record ? state.deviceTickets.get(record.id) : null;
+        if (ticketRecord?.protection === 'local-crypto-key') {
+            await deleteDeviceTicket(record.id);
+        }
     }
 
     async function getLocalDeviceKey(keyId) {
@@ -1497,6 +1516,7 @@
             version: 1,
             protection: 'passkey-prf',
             authorization: 'permanent',
+            rememberDeviceRequested: true,
             credentialScope: 'origin',
             taskId: record.id,
             bundleId,
@@ -1544,6 +1564,7 @@
         await saveDeviceTicket({
             version: 1,
             protection: 'local-crypto-key',
+            rememberDeviceRequested: true,
             taskId: record.id,
             bundleId,
             keyId,
@@ -1759,9 +1780,25 @@
     }
 
     function showDeviceSavePrompt(pendingUnlock) {
-        state.pendingUnlock = pendingUnlock;
+        state.pendingUnlock = {
+            ...pendingUnlock,
+            rememberDeviceRequested: true
+        };
         setTokenPromptMode('saveDevice', pendingUnlock.record);
         setTokenStatus('Token accepted. Save this device for faster local unlocks.', 'success');
+
+        window.setTimeout(() => {
+            tokenSubmit?.focus({ preventScroll: true });
+        }, reduceMotion ? 0 : 120);
+    }
+
+    function showOpenRecordPrompt(pendingUnlock, message = 'Token accepted. Click Open record to continue.') {
+        state.pendingUnlock = {
+            ...pendingUnlock,
+            readyToOpen: true
+        };
+        setTokenPromptMode('openRecord', pendingUnlock.record);
+        setTokenStatus(message, 'success');
 
         window.setTimeout(() => {
             tokenSubmit?.focus({ preventScroll: true });
@@ -1803,7 +1840,7 @@
 
         state.pendingUnlock = null;
 
-        if (rememberInSession && pendingUnlock.vaultKey) {
+        if ((rememberInSession || pendingUnlock.rememberInSession) && pendingUnlock.vaultKey) {
             setSessionVaultKey(pendingUnlock.record, pendingUnlock.bundlePayload, pendingUnlock.vaultKey);
         }
 
@@ -1813,13 +1850,16 @@
         closeProjects({ restorePageFocus: false });
     }
 
-    function skipPendingDeviceAccess() {
+    async function skipPendingDeviceAccess() {
         if (!state.pendingUnlock || state.unlocking) {
             closeTokenPrompt();
             return;
         }
 
-        completePendingUnlock({ rememberInSession: true });
+        const { record } = state.pendingUnlock;
+        deleteSessionVaultKey(record);
+        await deleteLocalFallbackTicket(record);
+        completePendingUnlock();
     }
 
     function finishDeviceTicketSave(pendingUnlock, ticketResult) {
@@ -1842,6 +1882,10 @@
 
         const pendingUnlock = state.pendingUnlock;
         if (!pendingUnlock) return;
+        if (!pendingUnlock.rememberDeviceRequested) {
+            await skipPendingDeviceAccess();
+            return;
+        }
 
         setUnlockBusy(true);
         setTokenStatus(
@@ -1954,7 +1998,7 @@
         }
 
         if (state.pendingUnlock && !state.unlocking) {
-            skipPendingDeviceAccess();
+            void skipPendingDeviceAccess();
             return;
         }
 
@@ -2180,7 +2224,8 @@
         }
 
         state.projects.forEach((project, index) => {
-            const hasSavedAccess = state.sessionVaultKeys.has(project.id) || state.deviceTickets.has(project.id);
+            const ticketRecord = state.deviceTickets.get(project.id);
+            const hasSavedAccess = state.sessionVaultKeys.has(project.id) || canUseSavedDeviceTicket(ticketRecord);
 
             appendRow({
                 label: project.label,
@@ -2302,7 +2347,7 @@
         }
 
         const ticketRecord = state.deviceTickets.get(record.id);
-        const hasMatchingTicket = ticketRecord && ticketRecord.bundleId === getBundleId(bundlePayload);
+        const hasMatchingTicket = canUseSavedDeviceTicket(ticketRecord) && ticketRecord.bundleId === getBundleId(bundlePayload);
 
         if (hasMatchingTicket) {
             if (ticketRecord.protection === 'passkey-prf') {
@@ -2333,7 +2378,7 @@
 
         const ticketRecord = state.deviceTickets.get(record.id);
         const hasSessionAccess = state.sessionVaultKeys.has(record.id);
-        const hasSavedAccess = hasSessionAccess || Boolean(ticketRecord);
+        const hasSavedAccess = hasSessionAccess || canUseSavedDeviceTicket(ticketRecord);
 
         if (!hasSavedAccess) {
             openTokenPrompt(record.id);
@@ -2381,22 +2426,11 @@
             return;
         }
 
-        const shouldRememberDevice = Boolean(devicePassInput?.checked);
-        const shouldDeferViewerWindow = shouldRememberDevice && canAttemptPersistentDevicePass();
-        let viewerWindow = null;
-
-        if (!shouldDeferViewerWindow) {
-            viewerWindow = openViewerWindow();
-        }
-
-        if (!shouldDeferViewerWindow && !viewerWindow) {
-            setTokenStatus('Popup blocked. Allow popups for this site first.', 'error');
-            return;
-        }
-
-        if (viewerWindow) {
-            writeViewerPlaceholder(viewerWindow, state.activeRecord.label);
-        }
+        const shouldRememberDevice = Boolean(
+            devicePassInput &&
+            !devicePassInput.disabled &&
+            devicePassInput.checked
+        );
 
         setUnlockBusy(true);
         setTokenStatus('Decrypting archive...', 'success');
@@ -2420,27 +2454,19 @@
                 return;
             }
 
-            if (unlockResult.vaultKey) {
-                setSessionVaultKey(state.activeRecord, bundlePayload, unlockResult.vaultKey);
+            if (!shouldRememberDevice) {
+                deleteSessionVaultKey(state.activeRecord);
+                await deleteLocalFallbackTicket(state.activeRecord);
             }
 
-            if (!viewerWindow) {
-                viewerWindow = openViewerWindow();
-                if (!viewerWindow) {
-                    setTokenStatus('Token accepted, but the browser blocked the new tab. Allow popups and try again.', 'error');
-                    return;
-                }
-                writeViewerPlaceholder(viewerWindow, state.activeRecord.label);
-            }
-
-            viewerWindow.location.replace(viewerUrl);
-            setTokenStatus('Record unsealed. Opening in a new tab...', 'success');
-            closeTokenPrompt({ restorePanelFocus: false });
-            closeProjects({ restorePageFocus: false });
+            showOpenRecordPrompt({
+                record: state.activeRecord,
+                bundlePayload,
+                vaultKey: unlockResult.vaultKey,
+                viewerUrl,
+                viewerWindow: null
+            });
         } catch (error) {
-            if (viewerWindow) {
-                viewerWindow.close();
-            }
             setTokenStatus(error instanceof Error ? error.message : 'Unable to unlock this record.', 'error');
             tokenInput.focus({ preventScroll: true });
             tokenInput.select();

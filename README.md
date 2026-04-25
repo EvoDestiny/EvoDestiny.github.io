@@ -42,7 +42,9 @@
 
 如果用户选择绑定设备，浏览器会优先尝试用一个站点级 Passkey PRF 保护本地设备 ticket。第一次成功保存 PRF 时会创建一个系统 Passkey；后续其他 task 会复用同一个 Passkey，只为各自的 `vaultKey` 保存独立的本地 ticket，不再为每个 task 创建新的系统凭证。PRF ticket 是当前设备上的长期授权，不受 5 次或 24 小时限制；如果当前浏览器、认证器或用户授权导致 PRF 不可用，则退到 IndexedDB 中不可导出的 Web Crypto `CryptoKey`。降级 ticket 本身是一段本地密文，会写入 IndexedDB，并以同样的密文在 localStorage 中保留一份镜像；降级方案最多用于 5 次或 24 小时。持久本地存储不可用时，才只保留当前页面会话内的免输入缓存。
 
-Passkey/Windows Security 不会在点击项目或 token 校验成功时自动弹出。点击项目只会打开 token 面板；如果本浏览器保存过 PRF ticket，token 输入框下面会出现 `Use saved Passkey`，只有用户点这个按钮时才会触发系统授权。输入正确 token 后，如果勾选了 `Remember this device with Passkey`，页面会先进入 `Save Passkey` 步骤，只有用户再次点击保存时才尝试创建或复用站点级 Passkey；取消或创建失败时才写入 5 次/24 小时的本地降级 ticket。
+Passkey/Windows Security 不会在点击项目或 token 校验成功时自动弹出。点击项目只会打开 token 面板；如果本浏览器保存过 PRF ticket，token 输入框下面会出现 `Use saved Passkey`，只有用户点这个按钮时才会触发系统授权。`Remember this device with Passkey` 默认勾选；输入正确 token 后，只有保持勾选时，页面才会先进入 `Save Passkey` 步骤，并在用户再次点击保存时尝试创建或复用站点级 Passkey。取消或创建失败时才写入 5 次/24 小时的本地降级 ticket。
+
+如果取消勾选 `Remember this device with Passkey`，token 校验和解密会留在当前弹窗里完成，不会创建 Passkey ticket、不会写入 5 次/24 小时的本地降级 ticket，也不会写入 5 次/24 小时的页面会话缓存；如果这个 record 之前已有旧逻辑留下的会话缓存或 PRF 失败留下的本地降级 ticket，这次一次性解锁成功后也会清掉它。自动本地降级解锁只接受带有明确 Remember 标记的新 ticket，旧的无标记降级 ticket 不会再直接通过。完成后页面切到 `Open record` 步骤，用户再点击一次才打开临时 viewer 标签页。这样可以避免解密前先打开空白标签页导致浏览器把原页面降到后台，从而拖慢 Argon2 Worker。
 
 浏览器不能在不调用 WebAuthn 的情况下静默枚举或确认系统里是否仍保存着对应 Passkey。因此如果用户在 Windows 里手动删除了通行凭证，而站点本地 ticket 还在，页面仍可能显示 `Use saved Passkey` 入口；点击后验证会失败，用户需要重新输入 token 来刷新设备授权。
 
