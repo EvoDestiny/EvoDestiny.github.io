@@ -277,7 +277,9 @@ body.modal-open .student-id {
 }
 
 .token-panel {
-    max-width: 640px;
+    width: min(760px, 100%);
+    max-width: 760px;
+    --panel-copy-width: min(100%, 42rem);
 }
 
 .project-overlay.is-open .project-panel,
@@ -337,8 +339,6 @@ body.modal-open .student-id {
 }
 
 .project-title {
-    width: var(--panel-copy-width);
-    max-width: none;
     white-space: nowrap;
     text-wrap: nowrap;
 }
@@ -357,21 +357,22 @@ body.modal-open .student-id {
     color: var(--card-text);
 }
 
-.project-card,
-.token-card {
-    margin-top: 2rem;
-    border: 1px solid var(--card-border);
-    border-radius: 2rem;
-    background: var(--card-bg);
-    box-shadow: var(--card-shadow);
-}
-
 .project-card {
-    padding: clamp(1.1rem, 2.8vw, 1.55rem);
+    width: min(100%, 36rem);
+    margin: 2rem auto 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
 .token-card {
-    padding: clamp(1.15rem, 2.8vw, 1.55rem);
+    width: min(100%, 28rem);
+    margin: 2rem auto 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
 .project-list {
@@ -480,11 +481,12 @@ body.modal-open .student-id {
 }
 
 .token-meta {
-    margin-top: 0.8rem;
+    margin: 0.55rem auto 0;
     width: var(--panel-copy-width);
-    color: var(--card-muted);
-    font-size: 0.92rem;
+    color: var(--warm-soft);
+    font-size: 0.78rem;
     line-height: 1.4;
+    letter-spacing: 0.04em;
     text-align: center;
 }
 
@@ -494,7 +496,15 @@ body.modal-open .student-id {
 
 .token-form {
     display: grid;
-    gap: 0.9rem;
+    gap: 0.85rem;
+}
+
+.token-form > .saved-passkey-option {
+    order: 1;
+}
+
+.token-form > .token-note {
+    order: 2;
 }
 
 .token-label {
@@ -510,26 +520,23 @@ body.modal-open .student-id {
 }
 
 .token-field {
-    border-radius: 0.95rem;
+    border-radius: 0.75rem;
     border: 1px solid var(--card-border);
     background: #fff;
     transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
-.token-field:focus-within,
-.saved-passkey-option:focus-within,
-.device-pass-option:focus-within,
-.device-pass-option:has(.device-pass-input:checked) {
+.token-field:focus-within {
     border-color: var(--card-focus);
-    box-shadow: 0 0 0 4px var(--card-focus-shadow);
+    box-shadow: 0 0 0 3px var(--card-focus-shadow);
     background: #fff;
 }
 
 .token-input {
     width: 100%;
     border: 0;
-    border-radius: 0.95rem;
-    padding: 1rem 0.95rem;
+    border-radius: 0.75rem;
+    padding: 0.95rem 1rem;
     background: transparent;
     box-shadow: none;
     color: var(--card-text);
@@ -548,78 +555,88 @@ body.modal-open .student-id {
 }
 
 .token-note {
-    margin: 0.2rem auto 0;
-    max-width: 46ch;
-    color: var(--card-muted);
-    font-size: 0.84rem;
+    margin: 0.4rem auto 0;
+    max-width: 44ch;
+    color: var(--warm-soft);
+    font-size: 0.8rem;
     line-height: 1.5;
     text-align: center;
 }
 
 .token-status {
-    min-height: 0;
+    margin: 0;
     padding: 0;
-    border-radius: 0.95rem;
+    border: 0;
+    background: transparent;
     color: var(--card-muted);
-    font-size: 0.88rem;
-    line-height: 1.5;
+    font-size: 0.85rem;
+    line-height: 1.45;
     text-align: center;
     opacity: 0;
-    transform: translateY(-4px);
-    transition: opacity 180ms ease, transform 180ms ease, padding 180ms ease;
+    transform: translateY(-2px);
+    transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.token-status:empty {
+    display: none;
 }
 
 .token-status:not(:empty) {
-    padding: 0.8rem 0.95rem;
     opacity: 1;
     transform: translateY(0);
-    border: 1px solid var(--card-border);
-    background: #fff;
 }
 
 .token-status[data-tone="error"] {
-    color: #7c3d2f;
-    border-color: rgba(143, 67, 53, 0.22);
-    background: rgba(143, 67, 53, 0.08);
+    color: #8f4335;
 }
 
 .token-status[data-tone="success"] {
     color: var(--success);
-    border-color: rgba(85, 102, 63, 0.18);
-    background: rgba(85, 102, 63, 0.08);
 }
 
 .saved-passkey-option {
     display: grid;
-    gap: 0.5rem;
-    padding: 0.9rem 0.95rem;
-    border: 1px solid var(--card-border);
-    border-radius: 0.95rem;
-    background: #fff;
-    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    gap: 0.55rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
 }
 
 .saved-passkey-option[hidden] {
     display: none;
 }
 
+.saved-passkey-option:not([hidden]) {
+    margin-top: 0.6rem;
+    padding-top: 0.95rem;
+    border-top: 1px solid var(--card-border);
+}
+
 .saved-passkey-button {
-    min-height: 2.9rem;
+    width: 100%;
+    min-height: 3rem;
+    padding: 0.7rem 1.1rem;
     border: 1px solid var(--card-border-strong);
-    border-radius: 0.85rem;
+    border-radius: 0.75rem;
     background: #fff;
     color: var(--card-text);
     font: inherit;
     font-size: 0.95rem;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
 }
 
-.saved-passkey-button:hover {
-    border-color: var(--card-focus);
+.saved-passkey-button:hover,
+.saved-passkey-button:focus-visible {
+    border-color: #b8b1a4;
+    background: #fffdfa;
     transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(23, 22, 21, 0.08);
+    box-shadow: 0 6px 16px rgba(23, 22, 21, 0.06);
+}
+
+.saved-passkey-button:active {
+    transform: translateY(0) scale(0.985);
 }
 
 .saved-passkey-button:disabled {
@@ -632,25 +649,25 @@ body.modal-open .student-id {
 .saved-passkey-detail {
     margin: 0;
     color: var(--card-muted);
-    font-size: 0.82rem;
-    line-height: 1.4;
+    font-size: 0.8rem;
+    line-height: 1.45;
     text-align: center;
 }
 
 .device-pass-option {
     display: flex;
     align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.9rem 0.95rem;
-    border: 1px solid var(--card-border);
-    border-radius: 0.95rem;
-    background: #fff;
+    gap: 0.7rem;
+    margin-top: 0.4rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
     cursor: pointer;
-    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, opacity 160ms ease;
+    transition: opacity 160ms ease;
 }
 
-.device-pass-option:hover {
-    border-color: var(--card-focus);
+.device-pass-option[hidden] {
+    display: none;
 }
 
 .device-pass-option.is-disabled {
@@ -661,89 +678,96 @@ body.modal-open .student-id {
 .device-pass-input {
     width: 1rem;
     height: 1rem;
-    margin-top: 0.2rem;
+    margin-top: 0.18rem;
     accent-color: var(--card-button);
     flex: 0 0 auto;
 }
 
+.device-pass-input:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 3px;
+}
+
 .device-pass-copy {
     display: grid;
-    gap: 0.2rem;
+    gap: 0.15rem;
     min-width: 0;
 }
 
 .device-pass-title {
     color: var(--card-text);
-    font-size: 0.94rem;
-    font-weight: 600;
-    line-height: 1.3;
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.35;
 }
 
 .device-pass-detail {
     color: var(--card-muted);
-    font-size: 0.82rem;
-    line-height: 1.4;
+    font-size: 0.78rem;
+    line-height: 1.45;
 }
 
 .token-actions {
     display: flex;
     justify-content: center;
-    margin-top: 1.35rem;
-}
-
-.token-submit,
-.token-cancel {
-    min-height: 3.45rem;
-    padding: 0.9rem 1.2rem;
-    font: inherit;
-    font-size: 1rem;
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: none;
-    cursor: pointer;
-    transition: transform 180ms ease, background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+    margin-top: 1.6rem;
 }
 
 .token-submit {
     width: 100%;
+    min-height: 3rem;
+    padding: 0.8rem 1.1rem;
     border: 0;
-    border-radius: 0.95rem;
+    border-radius: 0.75rem;
     background: var(--card-button);
     color: #fff;
-}
-
-.token-cancel {
-    width: min(100%, 20rem);
-    border: 1px solid var(--card-border-strong);
-    border-radius: 1rem;
-    background: #fff;
-    color: var(--card-text);
-}
-
-.token-submit:hover,
-.token-cancel:hover,
-.token-submit:focus-visible,
-.token-cancel:focus-visible {
-    transform: translateY(-1px);
+    font: inherit;
+    font-size: 0.98rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    cursor: pointer;
+    transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
 .token-submit:hover,
 .token-submit:focus-visible {
     background: var(--card-button-hover);
+    transform: translateY(-1px);
     box-shadow: 0 10px 24px rgba(23, 22, 21, 0.14);
 }
 
-.token-submit:active,
-.token-cancel:active,
-.project-close:active,
-.token-close:active {
+.token-submit:active {
     transform: translateY(0) scale(0.985);
+}
+
+.token-cancel {
+    min-width: 7.5rem;
+    min-height: 2.7rem;
+    padding: 0.6rem 1.6rem;
+    border: 1px solid var(--card-border-strong);
+    border-radius: 0.7rem;
+    background: #fff;
+    color: var(--card-text);
+    font: inherit;
+    font-size: 0.92rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
 .token-cancel:hover,
 .token-cancel:focus-visible {
+    border-color: #b8b1a4;
     background: #fffdfa;
-    box-shadow: 0 10px 22px rgba(43, 31, 17, 0.05);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(43, 31, 17, 0.06);
+}
+
+.token-cancel:active,
+.project-close:active,
+.token-close:active {
+    transform: translateY(0) scale(0.985);
 }
 
 .token-submit:disabled,
@@ -813,9 +837,13 @@ body.modal-open .student-id {
         --panel-copy-width: min(100%, 32rem);
     }
 
+    .token-panel {
+        --panel-copy-width: min(100%, 30rem);
+    }
+
     .project-card,
     .token-card {
-        border-radius: 1.65rem;
+        width: min(100%, 28rem);
     }
 
     .project-row {
