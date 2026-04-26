@@ -792,11 +792,35 @@
         }
     }
 
+    function getDeviceTicketSlot(protection) {
+        if (protection === 'passkey-prf') return 'passkeyPrf';
+        if (protection === 'local-crypto-key') return 'localCryptoKey';
+        return '';
+    }
+
+    function getDeviceTicketFromGroup(group, protection) {
+        const slot = getDeviceTicketSlot(protection);
+        if (!group || !slot) return null;
+
+        if (group.tickets && typeof group.tickets === 'object') {
+            return group.tickets[slot] || null;
+        }
+
+        return group.protection === protection ? group : null;
+    }
+
     function getSavedPasskeyTicket(record) {
-        const ticketRecord = record ? state.deviceTickets.get(record.id) : null;
-        return ticketRecord && ticketRecord.protection === 'passkey-prf'
-            ? ticketRecord
-            : null;
+        const group = record ? state.deviceTickets.get(record.id) : null;
+        return getDeviceTicketFromGroup(group, 'passkey-prf');
+    }
+
+    function getSavedLocalFallbackTicket(record) {
+        const group = record ? state.deviceTickets.get(record.id) : null;
+        return getDeviceTicketFromGroup(group, 'local-crypto-key');
+    }
+
+    function getSavedDeviceTicket(record) {
+        return getSavedLocalFallbackTicket(record) || getSavedPasskeyTicket(record);
     }
 
     function canUseSavedDeviceTicket(ticketRecord) {
@@ -910,14 +934,35 @@
         }
     }
 
-    function upsertLocalDeviceTicket(ticketRecord) {
-        const records = readLocalDeviceTickets().filter(record => record && record.taskId !== ticketRecord.taskId);
-        records.push(ticketRecord);
+    function upsertLocalDeviceTicketGroup(ticketGroup) {
+        const records = readLocalDeviceTickets().filter(record => record && record.taskId !== ticketGroup.taskId);
+        records.push(ticketGroup);
         writeLocalDeviceTickets(records);
     }
 
-    function deleteLocalDeviceTicket(taskId) {
-        writeLocalDeviceTickets(readLocalDeviceTickets().filter(record => record && record.taskId !== taskId));
+    function deleteLocalDeviceTicket(taskId, protection = '') {
+        if (!protection) {
+            writeLocalDeviceTickets(readLocalDeviceTickets().filter(record => record && record.taskId !== taskId));
+            return;
+        }
+
+        const records = [];
+        for (const record of readLocalDeviceTickets()) {
+            const group = normalizeDeviceTicketGroup(record);
+            if (!group || group.taskId !== taskId) {
+                if (record) records.push(record);
+                continue;
+            }
+
+            const slot = getDeviceTicketSlot(protection);
+            if (slot && group.tickets) {
+                delete group.tickets[slot];
+            }
+            if (hasDeviceTicketGroupTickets(group)) {
+                records.push(group);
+            }
+        }
+        writeLocalDeviceTickets(records);
     }
 
     function readPasskeyCredentialRecord() {
@@ -947,8 +992,9 @@
             return storedCredential.credentialId;
         }
 
-        for (const ticketRecord of state.deviceTickets.values()) {
-            if (ticketRecord?.protection === 'passkey-prf' && ticketRecord.credentialId) {
+        for (const ticketGroup of state.deviceTickets.values()) {
+            const ticketRecord = getDeviceTicketFromGroup(ticketGroup, 'passkey-prf');
+            if (ticketRecord?.credentialId) {
                 return ticketRecord.credentialId;
             }
         }
@@ -962,12 +1008,93 @@
             : 0;
     }
 
-    function mergeLoadedDeviceTicket(record) {
-        if (!record || !record.taskId || !record.ticket) return;
+    function createDeviceTicketGroup(taskId) {
+        return {
+            version: 2,
+            taskId,
+            tickets: {},
+            updatedAt: 0
+        };
+    }
 
-        const current = state.deviceTickets.get(record.taskId);
-        if (!current || getDeviceTicketTimestamp(record) >= getDeviceTicketTimestamp(current)) {
-            state.deviceTickets.set(record.taskId, record);
+    function hasDeviceTicketGroupTickets(group) {
+        return Boolean(
+            getDeviceTicketFromGroup(group, 'passkey-prf') ||
+            getDeviceTicketFromGroup(group, 'local-crypto-key')
+        );
+    }
+
+    function normalizeDeviceTicketForGroup(ticketRecord, taskId) {
+        if (!ticketRecord || !ticketRecord.ticket || !ticketRecord.protection) return null;
+
+        const slot = getDeviceTicketSlot(ticketRecord.protection);
+        if (!slot) return null;
+
+        return {
+            ...ticketRecord,
+            taskId
+        };
+    }
+
+    function normalizeDeviceTicketGroup(record) {
+        if (!record || !record.taskId) return null;
+
+        const group = createDeviceTicketGroup(record.taskId);
+        const candidates = record.tickets && typeof record.tickets === 'object'
+            ? [record.tickets.passkeyPrf, record.tickets.localCryptoKey]
+            : [record];
+
+        for (const candidate of candidates) {
+            const ticketRecord = normalizeDeviceTicketForGroup(candidate, record.taskId);
+            if (!ticketRecord) continue;
+
+            const slot = getDeviceTicketSlot(ticketRecord.protection);
+            const current = group.tickets[slot];
+            if (!current || getDeviceTicketTimestamp(ticketRecord) >= getDeviceTicketTimestamp(current)) {
+                group.tickets[slot] = ticketRecord;
+            }
+            group.updatedAt = Math.max(group.updatedAt, getDeviceTicketTimestamp(ticketRecord));
+        }
+
+        return hasDeviceTicketGroupTickets(group) ? group : null;
+    }
+
+    function mergeDeviceTicketGroups(current, incoming) {
+        const currentGroup = normalizeDeviceTicketGroup(current);
+        const incomingGroup = normalizeDeviceTicketGroup(incoming);
+        const taskId = incomingGroup?.taskId || currentGroup?.taskId;
+        if (!taskId) return null;
+
+        const group = createDeviceTicketGroup(taskId);
+
+        for (const protection of ['passkey-prf', 'local-crypto-key']) {
+            const slot = getDeviceTicketSlot(protection);
+            const currentTicket = getDeviceTicketFromGroup(currentGroup, protection);
+            const incomingTicket = getDeviceTicketFromGroup(incomingGroup, protection);
+            const selectedTicket = !currentTicket || (
+                incomingTicket &&
+                getDeviceTicketTimestamp(incomingTicket) >= getDeviceTicketTimestamp(currentTicket)
+            )
+                ? incomingTicket
+                : currentTicket;
+
+            if (selectedTicket) {
+                group.tickets[slot] = selectedTicket;
+                group.updatedAt = Math.max(group.updatedAt, getDeviceTicketTimestamp(selectedTicket));
+            }
+        }
+
+        return hasDeviceTicketGroupTickets(group) ? group : null;
+    }
+
+    function mergeLoadedDeviceTicket(record) {
+        const incomingGroup = normalizeDeviceTicketGroup(record);
+        if (!incomingGroup) return;
+
+        const current = state.deviceTickets.get(incomingGroup.taskId);
+        const mergedGroup = mergeDeviceTicketGroups(current, incomingGroup);
+        if (mergedGroup) {
+            state.deviceTickets.set(incomingGroup.taskId, mergedGroup);
         }
     }
 
@@ -1011,16 +1138,30 @@
     }
 
     async function saveDeviceTicket(ticketRecord) {
-        const previousTicket = state.deviceTickets.get(ticketRecord.taskId);
+        const slot = getDeviceTicketSlot(ticketRecord?.protection);
+        if (!ticketRecord || !ticketRecord.taskId || !slot) {
+            throw new Error('Device ticket is invalid.');
+        }
 
-        state.deviceTickets.set(ticketRecord.taskId, ticketRecord);
-        upsertLocalDeviceTicket(ticketRecord);
+        const currentGroup = normalizeDeviceTicketGroup(state.deviceTickets.get(ticketRecord.taskId)) || createDeviceTicketGroup(ticketRecord.taskId);
+        const previousTicket = getDeviceTicketFromGroup(currentGroup, ticketRecord.protection);
+        const nextGroup = {
+            ...currentGroup,
+            tickets: {
+                ...currentGroup.tickets,
+                [slot]: ticketRecord
+            },
+            updatedAt: Math.max(Date.now(), getDeviceTicketTimestamp(ticketRecord))
+        };
+
+        state.deviceTickets.set(ticketRecord.taskId, nextGroup);
+        upsertLocalDeviceTicketGroup(nextGroup);
 
         let indexedDbWriteSucceeded = false;
 
         try {
             await runDevicePassTransaction('readwrite', store => {
-                store.put(ticketRecord);
+                store.put(nextGroup);
             });
             indexedDbWriteSucceeded = true;
         } catch (error) {
@@ -1039,10 +1180,40 @@
         renderProjects();
     }
 
-    async function deleteDeviceTicket(taskId) {
-        const ticketRecord = state.deviceTickets.get(taskId);
-        state.deviceTickets.delete(taskId);
-        deleteLocalDeviceTicket(taskId);
+    async function deleteDeviceTicket(taskId, protection = '') {
+        const currentGroup = normalizeDeviceTicketGroup(state.deviceTickets.get(taskId));
+        if (!currentGroup) {
+            renderProjects();
+            return;
+        }
+
+        const removedTickets = protection
+            ? [getDeviceTicketFromGroup(currentGroup, protection)].filter(Boolean)
+            : [
+                getDeviceTicketFromGroup(currentGroup, 'passkey-prf'),
+                getDeviceTicketFromGroup(currentGroup, 'local-crypto-key')
+            ].filter(Boolean);
+        const slot = getDeviceTicketSlot(protection);
+        const nextGroup = protection
+            ? {
+                ...currentGroup,
+                tickets: {
+                    ...currentGroup.tickets
+                },
+                updatedAt: Date.now()
+            }
+            : null;
+
+        if (nextGroup && slot) {
+            delete nextGroup.tickets[slot];
+        }
+
+        if (nextGroup && hasDeviceTicketGroupTickets(nextGroup)) {
+            state.deviceTickets.set(taskId, nextGroup);
+        } else {
+            state.deviceTickets.delete(taskId);
+        }
+        deleteLocalDeviceTicket(taskId, protection);
 
         if (!window.indexedDB) {
             renderProjects();
@@ -1051,22 +1222,27 @@
 
         try {
             await runDevicePassTransaction('readwrite', store => {
-                store.delete(taskId);
+                if (nextGroup && hasDeviceTicketGroupTickets(nextGroup)) {
+                    store.put(nextGroup);
+                } else {
+                    store.delete(taskId);
+                }
             });
-            if (ticketRecord && ticketRecord.keyId) {
+            for (const ticketRecord of removedTickets) {
+                if (!ticketRecord.keyId) continue;
                 await deleteLocalDeviceKey(ticketRecord.keyId);
             }
         } catch (error) {
-            // The in-memory ticket state was already cleared.
+            // The in-memory ticket state was already updated.
         }
 
         renderProjects();
     }
 
     async function deleteLocalFallbackTicket(record) {
-        const ticketRecord = record ? state.deviceTickets.get(record.id) : null;
+        const ticketRecord = getSavedLocalFallbackTicket(record);
         if (ticketRecord?.protection === 'local-crypto-key') {
-            await deleteDeviceTicket(record.id);
+            await deleteDeviceTicket(record.id, 'local-crypto-key');
         }
     }
 
@@ -1428,14 +1604,18 @@
         const existingCredentialId = getSavedPasskeyCredentialId();
 
         if (existingCredentialId) {
-            const prfResults = await getPasskeyPrfOutputs(existingCredentialId, firstSalt);
-            writePasskeyCredentialRecord(existingCredentialId);
+            try {
+                const prfResults = await getPasskeyPrfOutputs(existingCredentialId, firstSalt);
+                writePasskeyCredentialRecord(existingCredentialId);
 
-            return {
-                credentialId: existingCredentialId,
-                prfOutput: prfResults.first,
-                reusedCredential: true
-            };
+                return {
+                    credentialId: existingCredentialId,
+                    prfOutput: prfResults.first,
+                    reusedCredential: true
+                };
+            } catch (error) {
+                console.warn('Saved Passkey credential could not be reused; creating a new one:', error);
+            }
         }
 
         const result = await createPasskeyPrfCredential(firstSalt);
@@ -1609,6 +1789,13 @@
         }
     }
 
+    function createDeviceTicketMismatchError(message, cause) {
+        const error = new Error(message);
+        error.deviceTicketMismatch = true;
+        error.cause = cause;
+        return error;
+    }
+
     async function unlockWithDeviceTicket(record, bundlePayload, ticketRecord) {
         if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload) || bundlePayload.version !== 3) {
             throw new Error('Device ticket is stale.');
@@ -1621,9 +1808,13 @@
         const currentTicket = parseDeviceTicket(ticketRecord.ticket);
         const nextSalt = getRandomBytes(32);
         const prfResults = await getPasskeyPrfOutputs(ticketRecord.credentialId, currentTicket.salt, nextSalt);
-        const payload = await decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfResults.first);
-
-        validateDeviceTicketPayload(payload, ticketRecord, bundlePayload);
+        let payload;
+        try {
+            payload = await decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfResults.first);
+            validateDeviceTicketPayload(payload, ticketRecord, bundlePayload);
+        } catch (error) {
+            throw createDeviceTicketMismatchError('Saved Passkey ticket no longer matches this archive.', error);
+        }
 
         const now = Date.now();
         const vaultKey = base64urlToBytes(payload.vaultKey);
@@ -1695,7 +1886,7 @@
 
             await saveDeviceTicket(nextRecord);
         } else {
-            await deleteDeviceTicket(record.id);
+            await deleteDeviceTicket(record.id, 'local-crypto-key');
         }
 
         return vaultKey;
@@ -1942,10 +2133,10 @@
 
         try {
             const bundlePayload = await fetchBundlePayload(record);
-            const ticketRecord = state.deviceTickets.get(record.id);
+            const ticketRecord = getSavedPasskeyTicket(record);
 
             if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload)) {
-                await deleteDeviceTicket(record.id);
+                await deleteDeviceTicket(record.id, 'passkey-prf');
                 throw new Error('Saved Passkey access is no longer available.');
             }
 
@@ -1953,14 +2144,20 @@
             try {
                 vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord);
             } catch (error) {
-                if (!(error && error.name === 'NotAllowedError')) {
-                    await deleteDeviceTicket(record.id);
+                if (error?.deviceTicketMismatch) {
+                    await deleteDeviceTicket(record.id, 'passkey-prf');
                 }
 
                 throw error;
             }
 
-            const unlockResult = await decryptBundleWithVaultKey(bundlePayload, vaultKey);
+            let unlockResult;
+            try {
+                unlockResult = await decryptBundleWithVaultKey(bundlePayload, vaultKey);
+            } catch (error) {
+                await deleteDeviceTicket(record.id, 'passkey-prf');
+                throw createDeviceTicketMismatchError('Saved Passkey ticket no longer opens this archive.', error);
+            }
             const fileMap = unpackArchive(unlockResult.archiveBytes);
 
             state.pendingSavedAccess = {
@@ -2224,7 +2421,7 @@
         }
 
         state.projects.forEach((project, index) => {
-            const ticketRecord = state.deviceTickets.get(project.id);
+            const ticketRecord = getSavedDeviceTicket(project);
             const hasSavedAccess = state.sessionVaultKeys.has(project.id) || canUseSavedDeviceTicket(ticketRecord);
 
             appendRow({
@@ -2346,20 +2543,21 @@
             return;
         }
 
-        const ticketRecord = state.deviceTickets.get(record.id);
-        const hasMatchingTicket = canUseSavedDeviceTicket(ticketRecord) && ticketRecord.bundleId === getBundleId(bundlePayload);
+        const ticketRecord = getSavedLocalFallbackTicket(record);
+        if (ticketRecord && ticketRecord.bundleId !== getBundleId(bundlePayload)) {
+            await deleteDeviceTicket(record.id, 'local-crypto-key');
+            throw new Error('Saved local access is no longer available.');
+        }
+
+        const hasMatchingTicket = canUseSavedDeviceTicket(ticketRecord);
 
         if (hasMatchingTicket) {
-            if (ticketRecord.protection === 'passkey-prf') {
-                throw new Error('Saved Passkey access requires confirmation.');
-            }
-
             let vaultKey;
             try {
                 vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord);
             } catch (error) {
                 if (!(error && error.name === 'NotAllowedError')) {
-                    await deleteDeviceTicket(record.id);
+                    await deleteDeviceTicket(record.id, 'local-crypto-key');
                 }
 
                 throw error;
@@ -2376,7 +2574,9 @@
         const record = state.projects.find(project => project.id === recordId);
         if (!record) return;
 
-        const ticketRecord = state.deviceTickets.get(record.id);
+        const passkeyTicket = getSavedPasskeyTicket(record);
+        const fallbackTicket = getSavedLocalFallbackTicket(record);
+        const ticketRecord = getSavedDeviceTicket(record);
         const hasSessionAccess = state.sessionVaultKeys.has(record.id);
         const hasSavedAccess = hasSessionAccess || canUseSavedDeviceTicket(ticketRecord);
 
@@ -2385,7 +2585,7 @@
             return;
         }
 
-        if (!hasSessionAccess && ticketRecord?.protection === 'passkey-prf') {
+        if (!hasSessionAccess && passkeyTicket && !fallbackTicket) {
             openTokenPrompt(record.id);
             setTokenStatus('Saved Passkey unlock is available below the token field.', 'success');
             return;
@@ -2404,9 +2604,14 @@
             await trySavedAccess(record, viewerWindow);
         } catch (error) {
             viewerWindow.close();
-            if (ticketRecord?.protection === 'passkey-prf') {
+            if (passkeyTicket) {
                 openTokenPrompt(record.id);
-                setTokenStatus(error instanceof Error ? error.message : 'Saved Passkey access requires confirmation.', 'error');
+                setTokenStatus(
+                    error instanceof Error
+                        ? `${error.message} Saved Passkey unlock is available below the token field.`
+                        : 'Saved Passkey access requires confirmation.',
+                    'error'
+                );
             } else {
                 openTokenPrompt(record.id);
                 setTokenStatus(error instanceof Error ? error.message : 'Saved access failed. Enter the token again.', 'error');
