@@ -4,17 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EvoDestiny</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="external/fonts/fonts.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="particles.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="external/three/three-r128.js"></script>
 </head>
 <body>
     <canvas id="bgCanvas" aria-hidden="true"></canvas>
 
-    <div class="student-id" aria-hidden="true"><span>2</span><span>5</span><span>0</span><span>5</span><span>1</span><span>0</span><span>3</span><span>0</span><span>3</span><span>1</span><span>9</span></div>
+    <div class="owner-code" aria-hidden="true"><span>2</span><span>5</span><span>0</span><span>5</span><span>1</span><span>0</span><span>3</span><span>0</span><span>3</span><span>1</span><span>9</span></div>
 
     <div class="container">
         <div class="greeting">Hello, I'm</div>
@@ -53,6 +51,7 @@
             <h2 class="token-title" id="token-title">Enter your token</h2>
             <p class="token-description" id="token-description">Use the access token for this record. The archive is decrypted locally in your browser and opened in a new tab.</p>
             <p class="token-meta" id="token-meta"></p>
+            <div class="owner-verification" id="owner-verification" hidden></div>
             <div class="token-card">
                 <form class="token-form" id="token-form" novalidate>
                     <label class="token-label" for="token-input">Access token</label>
@@ -72,21 +71,39 @@
                     <p class="token-status" id="token-status" aria-live="polite"></p>
                     <div class="saved-passkey-option" id="saved-passkey-option" hidden>
                         <button type="button" class="saved-passkey-button" id="saved-passkey-button">Use saved Passkey</button>
-                        <p class="saved-passkey-detail" id="saved-passkey-detail">Saved Passkey unlock is available. Windows Security opens only after you choose Use saved Passkey.</p>
+                        <p class="saved-passkey-detail" id="saved-passkey-detail">Saved Passkey unlock is available. Windows Security opens only after you choose Use saved Passkey, then owner code is required.</p>
                     </div>
-                    <label class="device-pass-option" id="device-pass-option" for="device-pass-input">
-                        <input
-                            class="device-pass-input"
-                            id="device-pass-input"
-                            name="device-pass"
-                            type="checkbox"
-                            checked
-                        >
-                        <span class="device-pass-copy">
-                            <span class="device-pass-title">Remember this device with Passkey</span>
-                            <span class="device-pass-detail">Passkey unlock stays saved on this device; fallback local tickets last 5 uses or 24 hours.</span>
-                        </span>
-                    </label>
+                    <div class="device-id-confirm" id="device-id-confirm" hidden>
+                        <label class="device-id-label" for="device-id-input">Type the visible owner code</label>
+                        <div class="device-id-field">
+                            <input
+                                class="device-id-input"
+                                id="device-id-input"
+                                name="device-id"
+                                type="text"
+                                inputmode="numeric"
+                                autocomplete="off"
+                                autocapitalize="off"
+                                spellcheck="false"
+                                placeholder="Owner code"
+                            >
+                        </div>
+                        <p class="device-id-detail">Type the code shown in the top-left corner to save this device.</p>
+                    </div>
+                    <div class="device-pass-section" id="device-pass-section">
+                        <label class="device-pass-option" id="device-pass-option" for="device-pass-input">
+                            <input
+                                class="device-pass-input"
+                                id="device-pass-input"
+                                name="device-pass"
+                                type="checkbox"
+                            >
+                            <span class="device-pass-copy">
+                                <span class="device-pass-title">Remember this device with Passkey</span>
+                                <span class="device-pass-detail">Passkey unlock stays saved on this device; fallback local tickets last 5 uses or 24 hours.</span>
+                            </span>
+                        </label>
+                    </div>
                     <button type="submit" class="token-submit" id="token-submit">Continue with token</button>
                     <p class="token-note">The token is never stored. Passkey PRF unlocks stay saved locally; fallback browser-key tickets are limited to 5 uses or 24 hours.</p>
                 </form>

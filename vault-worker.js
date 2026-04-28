@@ -19,17 +19,35 @@ function createWorkerError(message) {
     return error;
 }
 
-function getBundleAad(bundlePayload) {
+function getBundleAad(bundlePayload, ownerHash) {
     if (!bundlePayload || !bundlePayload.bundleId) {
         return undefined;
+    }
+
+    if (bundlePayload.version >= 4) {
+        if (!ownerHash) {
+            throw createWorkerError('Archive owner binding is unavailable.');
+        }
+
+        const version = bundlePayload.version >= 5 ? 5 : 4;
+        return textEncoder.encode(`evo-vault-archive-v${version}:${bundlePayload.taskId}:${bundlePayload.bundleId}:${ownerHash}`);
     }
 
     return textEncoder.encode(`evo-vault-archive:${bundlePayload.taskId}:${bundlePayload.bundleId}`);
 }
 
-function getSlotAad(bundlePayload, slot) {
+function getSlotAad(bundlePayload, slot, ownerHash) {
     if (!bundlePayload || !bundlePayload.bundleId || !slot || !slot.id) {
         return undefined;
+    }
+
+    if (bundlePayload.version >= 4) {
+        if (!ownerHash) {
+            throw createWorkerError('Archive owner binding is unavailable.');
+        }
+
+        const version = bundlePayload.version >= 5 ? 5 : 4;
+        return textEncoder.encode(`evo-vault-slot-v${version}:${bundlePayload.taskId}:${bundlePayload.bundleId}:${slot.id}:${ownerHash}`);
     }
 
     return textEncoder.encode(`evo-vault-slot:${bundlePayload.taskId}:${bundlePayload.bundleId}:${slot.id}`);
@@ -40,6 +58,41 @@ async function importAesKey(keyBytes, usages) {
         'raw',
         keyBytes,
         'AES-GCM',
+        false,
+        usages
+    );
+}
+
+async function deriveArchiveKey(vaultKeyBytes, bundlePayload, ownerHash, usages) {
+    if (bundlePayload.version < 5) {
+        return importAesKey(vaultKeyBytes, usages);
+    }
+
+    const derivation = bundlePayload.bundle && bundlePayload.bundle.keyDerivation;
+    if (!derivation || derivation.name !== 'HKDF-SHA-256' || !derivation.salt) {
+        throw createWorkerError('Archive key derivation is unavailable.');
+    }
+
+    const baseKey = await self.crypto.subtle.importKey(
+        'raw',
+        vaultKeyBytes,
+        'HKDF',
+        false,
+        ['deriveKey']
+    );
+
+    return self.crypto.subtle.deriveKey(
+        {
+            name: 'HKDF',
+            hash: 'SHA-256',
+            salt: base64ToBytes(derivation.salt),
+            info: textEncoder.encode(`evo-vault-archive-key-v5:${bundlePayload.taskId}:${bundlePayload.bundleId}:${ownerHash}`)
+        },
+        baseKey,
+        {
+            name: 'AES-GCM',
+            length: 256
+        },
         false,
         usages
     );
@@ -78,7 +131,7 @@ function validateLegacyBundlePayload(bundlePayload) {
 }
 
 function validateVaultBundlePayload(bundlePayload) {
-    if (!bundlePayload || bundlePayload.version !== 3) {
+    if (!bundlePayload || ![3, 4, 5].includes(bundlePayload.version)) {
         throw createWorkerError('Archive format is unsupported.');
     }
 
@@ -88,6 +141,17 @@ function validateVaultBundlePayload(bundlePayload) {
 
     if (!Array.isArray(bundlePayload.slots)) {
         throw createWorkerError('Archive unlock slots are missing.');
+    }
+
+    if (bundlePayload.version >= 4 && (!bundlePayload.ownerHash || !bundlePayload.owner || !bundlePayload.ownerSignature)) {
+        throw createWorkerError('Archive owner proof is missing.');
+    }
+
+    if (bundlePayload.version >= 5) {
+        const derivation = bundlePayload.bundle.keyDerivation;
+        if (!derivation || derivation.name !== 'HKDF-SHA-256' || !derivation.salt) {
+            throw createWorkerError('Archive key derivation is unavailable.');
+        }
     }
 }
 
@@ -109,7 +173,7 @@ async function decryptLegacyBundle(bundlePayload, token) {
     );
 }
 
-async function unwrapVaultKey(bundlePayload, token) {
+async function unwrapVaultKey(bundlePayload, token, ownerHash) {
     validateVaultBundlePayload(bundlePayload);
 
     const tokenSlot = getTokenSlot(bundlePayload);
@@ -122,7 +186,7 @@ async function unwrapVaultKey(bundlePayload, token) {
         {
             name: 'AES-GCM',
             iv: base64ToBytes(tokenSlot.iv),
-            additionalData: getSlotAad(bundlePayload, tokenSlot)
+            additionalData: getSlotAad(bundlePayload, tokenSlot, ownerHash)
         },
         slotKey,
         base64ToBytes(tokenSlot.wrappedVaultKey)
@@ -131,15 +195,15 @@ async function unwrapVaultKey(bundlePayload, token) {
     return new Uint8Array(vaultKey);
 }
 
-async function decryptVaultBundle(bundlePayload, vaultKeyBytes) {
+async function decryptVaultBundle(bundlePayload, vaultKeyBytes, ownerHash) {
     validateVaultBundlePayload(bundlePayload);
 
-    const key = await importAesKey(vaultKeyBytes, ['decrypt']);
+    const key = await deriveArchiveKey(vaultKeyBytes, bundlePayload, ownerHash, ['decrypt']);
     return self.crypto.subtle.decrypt(
         {
             name: 'AES-GCM',
             iv: base64ToBytes(bundlePayload.bundle.iv),
-            additionalData: getBundleAad(bundlePayload)
+            additionalData: getBundleAad(bundlePayload, ownerHash)
         },
         key,
         base64ToBytes(bundlePayload.bundle.ciphertext)
@@ -147,7 +211,7 @@ async function decryptVaultBundle(bundlePayload, vaultKeyBytes) {
 }
 
 self.addEventListener('message', async event => {
-    const { id, mode = 'token', token, vaultKey, bundlePayload } = event.data || {};
+    const { id, mode = 'token', token, vaultKey, bundlePayload, ownerHash } = event.data || {};
     if (typeof id !== 'number') return;
 
     try {
@@ -161,10 +225,10 @@ self.addEventListener('message', async event => {
 
             plaintext = await decryptLegacyBundle(bundlePayload, token);
         } else if (mode === 'vaultKey') {
-            plaintext = await decryptVaultBundle(bundlePayload, new Uint8Array(vaultKey));
+            plaintext = await decryptVaultBundle(bundlePayload, new Uint8Array(vaultKey), ownerHash);
         } else {
-            unwrappedVaultKey = await unwrapVaultKey(bundlePayload, token);
-            plaintext = await decryptVaultBundle(bundlePayload, unwrappedVaultKey);
+            unwrappedVaultKey = await unwrapVaultKey(bundlePayload, token, ownerHash);
+            plaintext = await decryptVaultBundle(bundlePayload, unwrappedVaultKey, ownerHash);
         }
 
         self.postMessage(

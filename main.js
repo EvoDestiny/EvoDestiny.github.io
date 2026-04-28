@@ -64,12 +64,15 @@
     const savedPasskeyOption = document.getElementById('saved-passkey-option');
     const savedPasskeyButton = document.getElementById('saved-passkey-button');
     const savedPasskeyDetail = document.getElementById('saved-passkey-detail');
+    const ownerVerificationPanel = document.getElementById('owner-verification');
     const tokenField = tokenForm?.querySelector('.token-field') || null;
     const tokenLabel = tokenForm?.querySelector('.token-label') || null;
     const tokenNote = tokenForm?.querySelector('.token-note') || null;
     const devicePassInput = document.getElementById('device-pass-input');
     const devicePassOption = document.getElementById('device-pass-option');
     const devicePassDetail = devicePassOption?.querySelector('.device-pass-detail') || null;
+    const deviceIdConfirm = document.getElementById('device-id-confirm');
+    const deviceIdInput = document.getElementById('device-id-input');
     const defaultTokenNote = tokenNote ? tokenNote.textContent : '';
 
     const state = {
@@ -83,6 +86,8 @@
         manifestLoaded: false,
         pendingUnlock: null,
         pendingSavedAccess: null,
+        pendingPasskeyAccess: null,
+        pendingFallbackAccess: null,
         projects: [],
         sessionVaultKeys: new Map(),
         tokenTimer: 0,
@@ -96,6 +101,8 @@
     let decryptWorker = null;
     let decryptMessageId = 0;
     let passkeyClientCapabilitiesReady = null;
+    let ownerRiskDialog = null;
+    let ownerRiskLastFocusedElement = null;
 
     const pendingDecryptions = new Map();
 
@@ -199,6 +206,24 @@
         return base64ToBytes(base64Value);
     }
 
+    function stableStringify(value) {
+        if (Array.isArray(value)) {
+            return `[${value.map(stableStringify).join(',')}]`;
+        }
+
+        if (value && typeof value === 'object') {
+            return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+        }
+
+        return JSON.stringify(value);
+    }
+
+    async function sha256Base64url(value) {
+        const bytes = typeof value === 'string' ? textEncoder.encode(value) : value;
+        const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+        return bytesToBase64url(new Uint8Array(digest));
+    }
+
     function escapeHtml(value) {
         return String(value).replace(/[&<>"']/g, character => ({
             '&': '&amp;',
@@ -215,6 +240,274 @@
         return bytes;
     }
 
+    function clearClipboardSilently() {
+        if (!window.isSecureContext || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+            return;
+        }
+
+        navigator.clipboard.writeText('').catch(() => {});
+    }
+
+    const ownerCodeGuard = (() => {
+        const selectorBytes = [46, 111, 119, 110, 101, 114, 45, 99, 111, 100, 101];
+        const compactDigits = value => String(value ?? '').replace(/\D/g, '');
+        const rotate = (value, bits) => ((value << bits) | (value >>> (32 - bits))) >>> 0;
+        const sameText = (left, right) => {
+            const a = String(left ?? '');
+            const b = String(right ?? '');
+            const length = Math.max(a.length, b.length);
+            let delta = a.length ^ b.length;
+
+            for (let index = 0; index < length; index += 1) {
+                delta |= (a.charCodeAt(index) || 0) ^ (b.charCodeAt(index) || 0);
+            }
+
+            return delta === 0;
+        };
+        const mixDigits = value => {
+            const digits = compactDigits(value);
+            const lanes = [
+                (0x6d2b79f5 ^ digits.length) >>> 0,
+                (0x1b873593 + digits.length) >>> 0,
+                (0x85ebca6b ^ (digits.length << 16)) >>> 0,
+                0xc2b2ae35
+            ];
+
+            for (let index = 0; index < digits.length; index += 1) {
+                const digit = digits.charCodeAt(index) - 48;
+                const lane = index & 3;
+                const salt = ((digit + 1) * (index + 17)) ^ ((index + 1) << 8);
+                lanes[lane] = Math.imul(
+                    rotate(lanes[lane] ^ salt, ((digit + index) % 17) + 5),
+                    0x9e3779b1
+                ) >>> 0;
+                lanes[(lane + 1) & 3] = (
+                    lanes[(lane + 1) & 3] ^
+                    rotate((lanes[lane] + digit + index) >>> 0, ((index * 3 + digit) % 19) + 3)
+                ) >>> 0;
+            }
+
+            const folded = lanes.reduce(
+                (accumulator, lane, index) => (accumulator ^ rotate(lane, (index * 7) + 3)) >>> 0,
+                (0xa5a5a5a5 ^ digits.length) >>> 0
+            );
+            const shadow = Array.from(digits)
+                .map((digit, index) => String.fromCharCode(97 + (((digit.charCodeAt(0) - 48) + index + digits.length) % 26)))
+                .reverse()
+                .join('');
+
+            return `${digits.length.toString(36)}:${lanes.map(lane => lane.toString(36)).join('.')}:${folded.toString(36)}:${shadow}`;
+        };
+        const readVisible = () => {
+            const selector = String.fromCharCode(...selectorBytes);
+            const host = document.querySelector(selector);
+            if (!host) return '';
+
+            const fragments = host.children.length
+                ? Array.from(host.children).map(node => node.textContent || '')
+                : [host.textContent || ''];
+
+            return compactDigits(fragments.join(''));
+        };
+        const prove = candidate => {
+            const typedCode = compactDigits(candidate);
+            const visibleCode = readVisible();
+            const typedMirror = Array.from(typedCode).reverse().join('');
+            const visibleMirror = Array.from(visibleCode).reverse().join('');
+            const ok = Boolean(
+                typedCode &&
+                visibleCode &&
+                sameText(mixDigits(typedCode), mixDigits(visibleCode)) &&
+                sameText(mixDigits(typedMirror), mixDigits(visibleMirror)) &&
+                sameText(typedCode, visibleCode)
+            );
+
+            return { ok, typedCode, visibleCode };
+        };
+
+        return {
+            read: readVisible,
+            prove,
+            sameText
+        };
+    })();
+
+    function getDisplayedOwnerCode() {
+        return ownerCodeGuard.read();
+    }
+
+    function getOwnerCodeFromOwner(owner) {
+        if (!owner || typeof owner !== 'object') return '';
+
+        return owner.ownerCode || '';
+    }
+
+    function cloneOwnerWithOwnerCode(owner, ownerCode) {
+        return {
+            ...(owner || {}),
+            ownerCode
+        };
+    }
+
+    async function getClaimedOwnerHash(bundlePayload, claimedOwnerCode = getDisplayedOwnerCode()) {
+        if (!bundlePayload || bundlePayload.version < 4) {
+            return null;
+        }
+
+        if (!bundlePayload.owner || !claimedOwnerCode) {
+            throw new Error('Archive owner binding is unavailable.');
+        }
+
+        return sha256Base64url(stableStringify(cloneOwnerWithOwnerCode(bundlePayload.owner, claimedOwnerCode)));
+    }
+
+    async function verifyTypedOwnerCode(bundlePayload, value) {
+        const proof = ownerCodeGuard.prove(value || '');
+
+        if (!proof.ok) {
+            return {
+                ...proof,
+                reason: 'mismatch'
+            };
+        }
+
+        if (bundlePayload?.version >= 4) {
+            try {
+                const claimedHash = await getClaimedOwnerHash(bundlePayload, proof.typedCode);
+                if (!ownerCodeGuard.sameText(claimedHash, bundlePayload.ownerHash || '')) {
+                    return {
+                        ...proof,
+                        ok: false,
+                        ownerHash: claimedHash,
+                        reason: 'owner-binding'
+                    };
+                }
+
+                const signatureResult = await verifyOwnerSignature(bundlePayload.owner, bundlePayload.ownerSignature);
+                if (!signatureResult.valid) {
+                    return {
+                        ...proof,
+                        ok: false,
+                        ownerHash: claimedHash,
+                        signatureResult,
+                        reason: 'owner-signature'
+                    };
+                }
+
+                return {
+                    ...proof,
+                    ownerHash: claimedHash,
+                    signatureResult
+                };
+            } catch (error) {
+                return {
+                    ...proof,
+                    ok: false,
+                    reason: 'owner-binding-unavailable'
+                };
+            }
+        }
+
+        return proof;
+    }
+
+    async function verifyRememberOwnerCode(bundlePayload) {
+        return verifyTypedOwnerCode(bundlePayload, deviceIdInput?.value || '');
+    }
+
+    function closeOwnerCodeRiskDialog(options = {}) {
+        const { restoreFocus = true } = options;
+        if (!ownerRiskDialog || ownerRiskDialog.hidden) return;
+
+        ownerRiskDialog.classList.remove('is-open');
+        ownerRiskDialog.setAttribute('aria-hidden', 'true');
+
+        const finishClose = () => {
+            ownerRiskDialog.hidden = true;
+            if (restoreFocus && ownerRiskLastFocusedElement instanceof HTMLElement) {
+                ownerRiskLastFocusedElement.focus({ preventScroll: true });
+            }
+            ownerRiskLastFocusedElement = null;
+        };
+
+        if (reduceMotion) {
+            finishClose();
+            return;
+        }
+
+        window.setTimeout(finishClose, 180);
+    }
+
+    function ensureOwnerCodeRiskDialog() {
+        if (ownerRiskDialog) return ownerRiskDialog;
+
+        const dialog = document.createElement('div');
+        dialog.className = 'owner-risk';
+        dialog.hidden = true;
+        dialog.setAttribute('aria-hidden', 'true');
+        dialog.innerHTML = `
+            <section class="owner-risk-panel owner-verification" data-tone="error" role="alertdialog" aria-modal="true" aria-labelledby="owner-risk-title" aria-describedby="owner-risk-message" tabindex="-1">
+                <p class="owner-verification-title" id="owner-risk-title">Owner verification warning</p>
+                <dl class="owner-verification-grid">
+                    <dt>Owner code</dt>
+                    <dd id="owner-risk-code">Verification failed</dd>
+                    <dt>Page integrity</dt>
+                    <dd>Check the original site before continuing</dd>
+                    <dt>Risk</dt>
+                    <dd>Altered or impersonated submission</dd>
+                </dl>
+                <p class="owner-verification-message" id="owner-risk-message">
+                    The owner code did not pass security verification. If the code you typed matches the top-left code, check whether this page was altered or is being used as an impersonated submission.
+                </p>
+                <button type="button" class="owner-risk-action">Review owner code</button>
+            </section>
+        `;
+
+        const panel = dialog.querySelector('.owner-risk-panel');
+        const action = dialog.querySelector('.owner-risk-action');
+
+        action?.addEventListener('click', () => closeOwnerCodeRiskDialog());
+        dialog.addEventListener('click', event => {
+            if (event.target === dialog) {
+                closeOwnerCodeRiskDialog();
+            }
+        });
+        panel?.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                closeOwnerCodeRiskDialog();
+            }
+        });
+
+        document.body.appendChild(dialog);
+        ownerRiskDialog = dialog;
+        return ownerRiskDialog;
+    }
+
+    function showOwnerCodeRiskWarning() {
+        setTokenStatus('Owner code verification failed. Recheck the top-left code before continuing.', 'error');
+
+        const dialog = ensureOwnerCodeRiskDialog();
+        const panel = dialog.querySelector('.owner-risk-panel');
+        const action = dialog.querySelector('.owner-risk-action');
+        const codeRow = dialog.querySelector('#owner-risk-code');
+        ownerRiskLastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        if (codeRow) {
+            codeRow.textContent = getDisplayedOwnerCode() || 'Unavailable';
+        }
+        dialog.hidden = false;
+        dialog.setAttribute('aria-hidden', 'false');
+
+        requestAnimationFrame(() => {
+            dialog.classList.add('is-open');
+        });
+
+        window.setTimeout(() => {
+            (action || panel)?.focus({ preventScroll: true });
+        }, reduceMotion ? 0 : 80);
+    }
+
     function getBundleId(bundlePayload) {
         if (bundlePayload && bundlePayload.bundleId) {
             return bundlePayload.bundleId;
@@ -225,11 +518,11 @@
             : 'legacy:unknown';
     }
 
-    function getSessionVaultKey(record, bundlePayload) {
+    function getSessionVaultKey(record, bundlePayload, ownerHash = '') {
         const cached = state.sessionVaultKeys.get(record.id);
         const now = Date.now();
 
-        if (!cached || cached.bundleId !== getBundleId(bundlePayload)) {
+        if (!cached || cached.bundleId !== getBundleId(bundlePayload) || cached.ownerHash !== ownerHash) {
             return null;
         }
 
@@ -250,8 +543,12 @@
         return cached.vaultKey;
     }
 
-    function setSessionVaultKey(record, bundlePayload, vaultKey) {
-        if (!vaultKey || !bundlePayload || bundlePayload.version !== 3) {
+    function setSessionVaultKey(record, bundlePayload, vaultKey, ownerHash = '') {
+        if (!vaultKey || !bundlePayload || ![3, 4, 5].includes(bundlePayload.version)) {
+            return;
+        }
+
+        if (bundlePayload.version >= 4 && !ownerHash) {
             return;
         }
 
@@ -259,6 +556,7 @@
 
         state.sessionVaultKeys.set(record.id, {
             bundleId: getBundleId(bundlePayload),
+            ownerHash,
             vaultKey,
             usesRemaining: devicePassMaxUses,
             expiresAt: now + devicePassTtlMs,
@@ -369,7 +667,7 @@
     }
 
     async function runDecryptWorker(message) {
-        if (!message.bundlePayload || ![2, 3].includes(message.bundlePayload.version)) {
+        if (!message.bundlePayload || ![2, 3, 4, 5].includes(message.bundlePayload.version)) {
             throw new Error('Archive format is outdated and must be resealed.');
         }
 
@@ -397,19 +695,21 @@
         }
     }
 
-    async function decryptBundleWithToken(bundlePayload, token) {
+    async function decryptBundleWithToken(bundlePayload, token, ownerHash = null) {
         return runDecryptWorker({
             mode: 'token',
             token,
-            bundlePayload
+            bundlePayload,
+            ownerHash
         });
     }
 
-    async function decryptBundleWithVaultKey(bundlePayload, vaultKey) {
+    async function decryptBundleWithVaultKey(bundlePayload, vaultKey, ownerHash = null) {
         return runDecryptWorker({
             mode: 'vaultKey',
             vaultKey,
-            bundlePayload
+            bundlePayload,
+            ownerHash
         });
     }
 
@@ -514,7 +814,274 @@
         });
     }
 
-    function buildViewerUrl(record, fileMap) {
+    async function verifyOwnerSignature(owner, ownerSignature) {
+        if (!ownerSignature || ownerSignature.algorithm !== 'Ed25519' || !ownerSignature.publicKeySpki || !ownerSignature.signature) {
+            return { status: 'missing', valid: false };
+        }
+
+        if (!window.crypto?.subtle || typeof window.crypto.subtle.importKey !== 'function') {
+            return { status: 'unsupported', valid: false };
+        }
+
+        try {
+            const publicKeyBytes = base64ToBytes(ownerSignature.publicKeySpki);
+            const expectedFingerprint = `sha256-${await sha256Base64url(publicKeyBytes)}`;
+            const fingerprintMatches = ownerSignature.publicKeyFingerprint === expectedFingerprint;
+            const key = await window.crypto.subtle.importKey(
+                'spki',
+                publicKeyBytes,
+                { name: 'Ed25519' },
+                false,
+                ['verify']
+            );
+            const valid = await window.crypto.subtle.verify(
+                { name: 'Ed25519' },
+                key,
+                base64urlToBytes(ownerSignature.signature),
+                textEncoder.encode(stableStringify(owner))
+            );
+
+            return {
+                status: valid && fingerprintMatches ? 'valid' : 'invalid',
+                valid: valid && fingerprintMatches,
+                publicKeyFingerprint: ownerSignature.publicKeyFingerprint || expectedFingerprint
+            };
+        } catch (error) {
+            const unsupportedNames = ['NotSupportedError', 'DataError'];
+            if (unsupportedNames.includes(error?.name)) {
+                return {
+                    status: 'unsupported',
+                    valid: false,
+                    publicKeyFingerprint: ownerSignature.publicKeyFingerprint || ''
+                };
+            }
+
+            return {
+                status: 'invalid',
+                valid: false,
+                publicKeyFingerprint: ownerSignature.publicKeyFingerprint || ''
+            };
+        }
+    }
+
+    async function verifyBundleOwner(record, bundlePayload, fileMap, ownerHash) {
+        if (!bundlePayload || bundlePayload.version < 4) {
+            return {
+                ownerVerified: false,
+                signatureStatus: 'legacy',
+                claimedOwnerCode: getDisplayedOwnerCode(),
+                owner: null,
+                ownerHash: ownerHash || '',
+                taskId: record.id,
+                bundleId: getBundleId(bundlePayload),
+                messages: ['This archive was sealed before owner verification was added.']
+            };
+        }
+
+        const claimedOwnerCode = getDisplayedOwnerCode();
+        const meta = readVaultMeta(fileMap);
+        const messages = [];
+        const bundleOwner = bundlePayload.owner || null;
+        const archiveOwner = meta.owner || null;
+        const ownerSignature = bundlePayload.ownerSignature || null;
+        let computedOwnerHash = '';
+        let claimedOwnerHash = '';
+
+        if (!bundleOwner || !archiveOwner) {
+            messages.push('Owner metadata is missing.');
+        }
+
+        if (!claimedOwnerCode) {
+            messages.push('The visible owner code is missing.');
+        }
+
+        if (bundleOwner) {
+            computedOwnerHash = await sha256Base64url(stableStringify(bundleOwner));
+            if (claimedOwnerCode) {
+                claimedOwnerHash = await getClaimedOwnerHash(bundlePayload, claimedOwnerCode);
+            }
+        }
+
+        if (bundlePayload.ownerHash !== computedOwnerHash || meta.ownerHash !== computedOwnerHash || ownerHash !== claimedOwnerHash) {
+            messages.push('Owner binding does not match this page.');
+        }
+
+        if (stableStringify(bundleOwner) !== stableStringify(archiveOwner)) {
+            messages.push('Archive owner metadata differs from the public bundle owner.');
+        }
+
+        if (stableStringify(ownerSignature) !== stableStringify(meta.ownerSignature || null)) {
+            messages.push('Archive owner signature differs from the public bundle signature.');
+        }
+
+        if (claimedOwnerCode !== getOwnerCodeFromOwner(bundleOwner)) {
+            messages.push('Visible owner code does not match archive owner.');
+        }
+
+        const signatureResult = await verifyOwnerSignature(bundleOwner, ownerSignature);
+        if (!signatureResult.valid) {
+            messages.push(`Owner signature is ${signatureResult.status}.`);
+        }
+
+        return {
+            ownerVerified: messages.length === 0 && signatureResult.valid,
+            signatureStatus: signatureResult.status,
+            claimedOwnerCode,
+            owner: bundleOwner,
+            ownerHash: computedOwnerHash,
+            taskId: record.id,
+            bundleId: getBundleId(bundlePayload),
+            publicKeyFingerprint: signatureResult.publicKeyFingerprint || ownerSignature?.publicKeyFingerprint || '',
+            messages
+        };
+    }
+
+    function getOwnerVerificationRows(ownerVerification) {
+        const owner = ownerVerification?.owner || {};
+        return [
+            ['Owner code', getOwnerCodeFromOwner(owner) || ownerVerification?.claimedOwnerCode || 'Unknown'],
+            ['Canonical site', owner.canonicalSite || 'Unknown'],
+            ['Canonical repo', owner.canonicalRepo || 'Unknown'],
+            ['Task ID', owner.taskId || ownerVerification?.taskId || 'Unknown'],
+            ['Bundle ID', owner.bundleId || ownerVerification?.bundleId || 'Unknown'],
+            ['Signature', ownerVerification?.signatureStatus || 'unknown'],
+            ['Public key', ownerVerification?.publicKeyFingerprint || 'Unknown']
+        ];
+    }
+
+    function buildOwnerVerificationMarkup(ownerVerification, compact = false) {
+        if (!ownerVerification) return '';
+
+        const title = ownerVerification.ownerVerified ? 'Verified archive owner' : 'Owner verification warning';
+        const rows = getOwnerVerificationRows(ownerVerification);
+        const details = rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('');
+        const messages = ownerVerification.messages?.length
+            ? `<p class="owner-verification-message">${escapeHtml(ownerVerification.messages.join(' '))}</p>`
+            : '';
+
+        return `
+            <p class="owner-verification-title">${escapeHtml(title)}</p>
+            <dl class="owner-verification-grid">${details}</dl>
+            ${compact ? '' : messages}
+        `;
+    }
+
+    function renderOwnerVerification(ownerVerification) {
+        if (!ownerVerificationPanel) return;
+
+        if (!ownerVerification) {
+            ownerVerificationPanel.hidden = true;
+            ownerVerificationPanel.innerHTML = '';
+            delete ownerVerificationPanel.dataset.tone;
+            return;
+        }
+
+        ownerVerificationPanel.innerHTML = buildOwnerVerificationMarkup(ownerVerification);
+        ownerVerificationPanel.hidden = false;
+        ownerVerificationPanel.dataset.tone = ownerVerification.ownerVerified ? 'success' : 'error';
+    }
+
+    function assertOwnerVerification(ownerVerification) {
+        if (!ownerVerification || ownerVerification.ownerVerified) return;
+
+        throw new Error('Archive owner signature verification failed.');
+    }
+
+    function injectOwnerVerificationBadge(doc, ownerVerification) {
+        if (!ownerVerification) return;
+
+        const accentLine = ownerVerification.ownerVerified
+            ? 'rgba(201, 162, 39, 0.55)'
+            : 'rgba(143, 67, 53, 0.5)';
+        const titleColor = ownerVerification.ownerVerified ? '#171615' : '#6b3027';
+
+        const style = doc.createElement('style');
+        style.textContent = `
+.evo-owner-badge {
+    position: fixed;
+    z-index: 2147483647;
+    top: 50%;
+    left: 18px;
+    transform: translateY(-50%);
+    width: min(260px, calc(100vw - 32px));
+    padding: 18px 20px 20px;
+    border: 1px solid rgba(34, 37, 42, 0.1);
+    border-radius: 6px;
+    background: #fbf8f3;
+    color: #171615;
+    box-shadow: 0 12px 28px rgba(67, 50, 16, 0.08);
+    font: 12px/1.5 Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-align: left;
+}
+.evo-owner-badge .owner-verification-title {
+    margin: 0 auto;
+    font-family: "Cormorant Garamond", "Hoefler Text", "Garamond", "Times New Roman", serif;
+    font-size: 16px;
+    font-weight: 500;
+    font-style: italic;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+    text-align: center;
+    color: ${titleColor};
+}
+.evo-owner-badge .owner-verification-title::after {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 1px;
+    margin: 8px auto 0;
+    background: ${accentLine};
+}
+.evo-owner-badge .owner-verification-grid {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 14px;
+    row-gap: 6px;
+    margin: 14px 0 0;
+    align-items: baseline;
+}
+.evo-owner-badge dt {
+    margin: 0;
+    color: #6d6658;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    line-height: 1.5;
+}
+.evo-owner-badge dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: #171615;
+    font-size: 11.5px;
+    line-height: 1.5;
+    font-feature-settings: "tnum" 1;
+}
+@media (max-height: 520px) {
+    .evo-owner-badge {
+        top: 14px;
+        transform: none;
+    }
+}
+@media print {
+    .evo-owner-badge {
+        position: static;
+        width: auto;
+        box-shadow: none;
+        transform: none;
+        background: #fff;
+    }
+}`;
+        const badge = doc.createElement('aside');
+        badge.className = 'evo-owner-badge';
+        badge.setAttribute('aria-label', 'Archive owner verification');
+        badge.innerHTML = buildOwnerVerificationMarkup(ownerVerification, true);
+        doc.head.appendChild(style);
+        doc.body.prepend(badge);
+    }
+
+    function buildViewerUrl(record, fileMap, ownerVerification = null) {
         const meta = readVaultMeta(fileMap);
         const entryPath = normalizeBundlePath(meta.entry);
         const entryBytes = fileMap.get(entryPath);
@@ -560,6 +1127,7 @@
         const doc = new DOMParser().parseFromString(textDecoder.decode(entryBytes), 'text/html');
         rewriteDocumentResources(doc, entryPath, createResourceUrl);
         removeDocumentIcons(doc);
+        injectOwnerVerificationBadge(doc, ownerVerification);
 
         if (!doc.querySelector('title')) {
             const title = doc.createElement('title');
@@ -582,6 +1150,7 @@
 
     function writeViewerPlaceholder(viewerWindow, label) {
         const escapedLabel = escapeHtml(label);
+        const localFontsHref = escapeHtml(new URL('external/fonts/fonts.css', window.location.href).href);
 
         viewerWindow.document.open();
         viewerWindow.document.write(`<!DOCTYPE html>
@@ -590,9 +1159,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Unlocking ${escapedLabel}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="${localFontsHref}">
     <style>
         :root {
             --card-bg: #faf9f5;
@@ -765,14 +1332,17 @@
         if (!devicePassInput || !devicePassOption) return;
 
         const { resetChoice = true } = options;
-        const isV3Bundle = !bundlePayload || bundlePayload.version === 3;
-        const isAvailable = canAttemptPersistentDevicePass() && isV3Bundle;
+        const isSupportedBundle = !bundlePayload || [3, 4, 5].includes(bundlePayload.version);
+        const isAvailable = canAttemptPersistentDevicePass() && isSupportedBundle;
         const hasPasskeyPrfAttempt = canAttemptPasskeyPrf();
         const rpId = getPasskeyRpId();
 
         devicePassInput.disabled = !isAvailable;
         if (resetChoice || !isAvailable) {
-            devicePassInput.checked = isAvailable;
+            devicePassInput.checked = false;
+            if (deviceIdInput) {
+                deviceIdInput.value = '';
+            }
         }
         devicePassOption.classList.toggle('is-disabled', !isAvailable);
         devicePassOption.title = isAvailable
@@ -790,6 +1360,30 @@
                     ? 'This browser will fall back to session-only access if persistent local storage is unavailable.'
                     : 'Use localhost or the GitHub Pages HTTPS domain; IP origins only get session access.';
         }
+
+        updateDeviceIdConfirmation();
+        updateTokenSubmitAvailability();
+    }
+
+    function isTokenMode() {
+        return tokenPanel?.getAttribute('data-mode') === 'token';
+    }
+
+    function updateDeviceIdConfirmation() {
+        if (!deviceIdConfirm || !deviceIdInput || !devicePassInput) return;
+
+        const shouldShow = isTokenMode() && !devicePassInput.disabled && devicePassInput.checked;
+        deviceIdConfirm.hidden = !shouldShow;
+
+        if (!shouldShow) {
+            deviceIdInput.value = '';
+        }
+    }
+
+    function updateTokenSubmitAvailability() {
+        if (!tokenSubmit) return;
+
+        tokenSubmit.disabled = state.unlocking;
     }
 
     function getDeviceTicketSlot(protection) {
@@ -820,20 +1414,29 @@
     }
 
     function getSavedDeviceTicket(record) {
-        return getSavedLocalFallbackTicket(record) || getSavedPasskeyTicket(record);
+        const passkeyTicket = getSavedPasskeyTicket(record);
+        if (canUseSavedDeviceTicket(passkeyTicket)) return passkeyTicket;
+
+        return getSavedLocalFallbackTicket(record);
     }
 
     function canUseSavedDeviceTicket(ticketRecord) {
         if (!ticketRecord) return false;
-        if (ticketRecord.protection === 'passkey-prf') return true;
-        return ticketRecord.protection === 'local-crypto-key' && ticketRecord.rememberDeviceRequested === true;
+        if (ticketRecord.protection === 'passkey-prf') {
+            return ticketRecord.rememberDeviceRequested === true &&
+                ticketRecord.ownerCodeBinding === 'owner-hash-v2';
+        }
+        return ticketRecord.protection === 'local-crypto-key' &&
+            ticketRecord.rememberDeviceRequested === true &&
+            ticketRecord.ownerCodeBinding === 'local-secret-v1' &&
+            Boolean(ticketRecord.localSecretTicket);
     }
 
     function configureSavedPasskeyOption(record = state.activeRecord, mode = 'token') {
         if (!savedPasskeyOption) return;
 
         const ticketRecord = getSavedPasskeyTicket(record);
-        const isVisible = mode === 'token' && Boolean(ticketRecord);
+        const isVisible = mode === 'token' && canUseSavedDeviceTicket(ticketRecord);
 
         savedPasskeyOption.hidden = !isVisible;
 
@@ -842,7 +1445,7 @@
         }
 
         if (savedPasskeyDetail && isVisible) {
-            savedPasskeyDetail.textContent = 'Saved Passkey unlock is available. Windows Security opens only after you choose Use saved Passkey.';
+            savedPasskeyDetail.textContent = 'Saved Passkey unlock is available. Windows Security opens only after you choose Use saved Passkey, then owner code is required.';
         }
     }
 
@@ -1321,9 +1924,20 @@
             window.location.origin,
             context.taskId,
             context.bundleId,
+            context.ownerHash || '',
             context.protection || 'passkey-prf',
             getTicketProtectorId(context)
         ].join('|'));
+    }
+
+    function getLocalSecretContext(record, bundlePayload, ticketRecord, ownerHash = '') {
+        return {
+            taskId: record?.id || ticketRecord.taskId,
+            bundleId: getBundleId(bundlePayload),
+            ownerHash,
+            keyId: ticketRecord.keyId,
+            protection: 'local-secret-key'
+        };
     }
 
     function parseDeviceTicket(ticket) {
@@ -1349,7 +1963,7 @@
         ].join('.');
     }
 
-    async function deriveTicketKey(prfOutput, { taskId, bundleId, credentialId }) {
+    async function deriveTicketKey(prfOutput, { taskId, bundleId, credentialId, ownerHash }) {
         const baseKey = await window.crypto.subtle.importKey(
             'raw',
             prfOutput,
@@ -1362,8 +1976,47 @@
             {
                 name: 'HKDF',
                 hash: 'SHA-256',
-                salt: textEncoder.encode(`${window.location.origin}|${taskId}|${bundleId}`),
-                info: textEncoder.encode(`evo-vault-device-ticket-key|${credentialId}`)
+                salt: textEncoder.encode([
+                    window.location.origin,
+                    taskId,
+                    bundleId,
+                    ownerHash || '',
+                    'passkey-prf-v2'
+                ].join('|')),
+                info: textEncoder.encode(`evo-vault-passkey-ticket-key-v2|${credentialId}|${ownerHash || ''}`)
+            },
+            baseKey,
+            {
+                name: 'AES-GCM',
+                length: 256
+            },
+            false,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    async function deriveLocalFallbackTicketKey(localSecret, { taskId, bundleId, keyId, ownerHash }, salt) {
+        const baseKey = await window.crypto.subtle.importKey(
+            'raw',
+            localSecret,
+            'HKDF',
+            false,
+            ['deriveKey']
+        );
+
+        return window.crypto.subtle.deriveKey(
+            {
+                name: 'HKDF',
+                hash: 'SHA-256',
+                salt,
+                info: textEncoder.encode([
+                    'evo-vault-local-fallback-ticket-key-v1',
+                    window.location.origin,
+                    taskId,
+                    bundleId,
+                    ownerHash || '',
+                    keyId
+                ].join('|'))
             },
             baseKey,
             {
@@ -1399,15 +2052,21 @@
         return encryptDeviceTicketPayloadWithKey(payload, context, salt, key);
     }
 
-    async function decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key) {
-        const context = {
+    function getDeviceTicketContext(ticketRecord, bundlePayload, overrides = {}) {
+        return {
             taskId: ticketRecord.taskId,
             bundleId: getBundleId(bundlePayload),
+            ownerHash: ticketRecord.ownerHash || '',
             credentialId: ticketRecord.credentialId,
             keyId: ticketRecord.keyId,
-            protection: ticketRecord.protection || 'passkey-prf'
+            protection: ticketRecord.protection || 'passkey-prf',
+            ...overrides
         };
-        const ticket = parseDeviceTicket(ticketRecord.ticket);
+    }
+
+    async function decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key, options = {}) {
+        const context = options.context || getDeviceTicketContext(ticketRecord, bundlePayload);
+        const ticket = parseDeviceTicket(options.ticket || ticketRecord.ticket);
         const plaintext = await window.crypto.subtle.decrypt(
             {
                 name: 'AES-GCM',
@@ -1421,10 +2080,35 @@
         return JSON.parse(textDecoder.decode(plaintext));
     }
 
-    async function decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfOutput) {
+    async function decryptLocalFallbackSecret(record, bundlePayload, ticketRecord, key, ownerHash = '') {
+        if (ticketRecord.ownerCodeBinding !== 'local-secret-v1' || !ticketRecord.localSecretTicket) {
+            throw new Error('Saved local access must be refreshed with the token.');
+        }
+
+        const secretPayload = await decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key, {
+            ticket: ticketRecord.localSecretTicket,
+            context: getLocalSecretContext(record, bundlePayload, ticketRecord, ownerHash)
+        });
+
+        if (
+            !secretPayload ||
+            secretPayload.version !== 1 ||
+            secretPayload.taskId !== ticketRecord.taskId ||
+            secretPayload.bundleId !== getBundleId(bundlePayload) ||
+            (secretPayload.ownerHash || '') !== (ownerHash || '') ||
+            !secretPayload.localSecret
+        ) {
+            throw new Error('Saved local access does not match this owner.');
+        }
+
+        return base64urlToBytes(secretPayload.localSecret);
+    }
+
+    async function decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfOutput, ownerHash = ticketRecord.ownerHash || '') {
         const context = {
             taskId: ticketRecord.taskId,
             bundleId: getBundleId(bundlePayload),
+            ownerHash,
             credentialId: ticketRecord.credentialId,
             protection: ticketRecord.protection || 'passkey-prf'
         };
@@ -1627,14 +2311,18 @@
         };
     }
 
-    async function createDeviceTicket(record, bundlePayload, vaultKey) {
-        if (!canAttemptPersistentDevicePass() || !vaultKey || !bundlePayload || bundlePayload.version !== 3) {
+    async function createDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '') {
+        if (!canAttemptPersistentDevicePass() || !vaultKey || !bundlePayload || ![3, 4, 5].includes(bundlePayload.version)) {
             throw new Error('Persistent device tickets are unavailable in this browser.');
+        }
+
+        if (bundlePayload.version >= 4 && !ownerHash) {
+            throw new Error('Persistent device tickets require owner verification.');
         }
 
         if (canAttemptPasskeyPrf()) {
             if (await isPasskeyPrfExplicitlyUnavailable()) {
-                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey);
+                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash);
                 return {
                     ...fallbackResult,
                     prfAttempted: false,
@@ -1644,11 +2332,11 @@
             }
 
             try {
-                return await createPasskeyDeviceTicket(record, bundlePayload, vaultKey);
+                return await createPasskeyDeviceTicket(record, bundlePayload, vaultKey, ownerHash);
             } catch (error) {
                 const prfFailureReason = getErrorMessage(error);
                 console.warn('Passkey PRF ticket failed; falling back to local CryptoKey ticket:', error);
-                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey);
+                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash);
 
                 return {
                     ...fallbackResult,
@@ -1659,7 +2347,7 @@
             }
         }
 
-        const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey);
+        const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash);
 
         return {
             ...fallbackResult,
@@ -1669,7 +2357,7 @@
         };
     }
 
-    async function createPasskeyDeviceTicket(record, bundlePayload, vaultKey) {
+    async function createPasskeyDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '') {
         const salt = getRandomBytes(32);
         const { credentialId, prfOutput, reusedCredential } = await getOrCreatePasskeyPrfForTicket(salt);
         const now = Date.now();
@@ -1677,6 +2365,7 @@
         const context = {
             taskId: record.id,
             bundleId,
+            ownerHash,
             credentialId,
             protection: 'passkey-prf'
         };
@@ -1684,6 +2373,7 @@
             version: 1,
             taskId: record.id,
             bundleId,
+            ownerHash,
             vaultKey: bytesToBase64url(vaultKey),
             authorization: 'permanent',
             createdAt: now,
@@ -1695,11 +2385,13 @@
         await saveDeviceTicket({
             version: 1,
             protection: 'passkey-prf',
+            ownerCodeBinding: 'owner-hash-v2',
             authorization: 'permanent',
             rememberDeviceRequested: true,
             credentialScope: 'origin',
             taskId: record.id,
             bundleId,
+            ownerHash,
             credentialId,
             ticket,
             createdAt: now,
@@ -1715,22 +2407,40 @@
         };
     }
 
-    async function createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey) {
+    async function createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '') {
         const now = Date.now();
         const bundleId = getBundleId(bundlePayload);
         const keyId = `local:${record.id}:${bundleId}`;
         const key = await createLocalDeviceKey(keyId);
-        const salt = getRandomBytes(16);
+        const localSecret = getRandomBytes(32);
+        const localSecretSalt = getRandomBytes(16);
+        const ticketSalt = getRandomBytes(32);
         const context = {
             taskId: record.id,
             bundleId,
+            ownerHash,
             keyId,
             protection: 'local-crypto-key'
         };
+        const localSecretTicket = await encryptDeviceTicketPayloadWithKey(
+            {
+                version: 1,
+                taskId: record.id,
+                bundleId,
+                ownerHash,
+                localSecret: bytesToBase64url(localSecret),
+                createdAt: now
+            },
+            getLocalSecretContext(record, bundlePayload, { taskId: record.id, keyId }, ownerHash),
+            localSecretSalt,
+            key
+        );
+        const ticketKey = await deriveLocalFallbackTicketKey(localSecret, context, ticketSalt);
         const payload = {
             version: 1,
             taskId: record.id,
             bundleId,
+            ownerHash,
             vaultKey: bytesToBase64url(vaultKey),
             usesRemaining: devicePassMaxUses,
             maxUses: devicePassMaxUses,
@@ -1739,15 +2449,18 @@
             expiresAt: now + devicePassTtlMs,
             counter: 0
         };
-        const ticket = await encryptDeviceTicketPayloadWithKey(payload, context, salt, key);
+        const ticket = await encryptDeviceTicketPayloadWithKey(payload, context, ticketSalt, ticketKey);
 
         await saveDeviceTicket({
             version: 1,
             protection: 'local-crypto-key',
+            ownerCodeBinding: 'local-secret-v1',
             rememberDeviceRequested: true,
             taskId: record.id,
             bundleId,
+            ownerHash,
             keyId,
+            localSecretTicket,
             ticket,
             createdAt: now,
             updatedAt: now
@@ -1761,11 +2474,15 @@
         };
     }
 
-    function validateDeviceTicketPayload(payload, ticketRecord, bundlePayload) {
+    function validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash = '') {
         const now = Date.now();
 
         if (!payload || payload.version !== 1 || payload.taskId !== ticketRecord.taskId || payload.bundleId !== getBundleId(bundlePayload)) {
             throw new Error('Device ticket does not match this archive.');
+        }
+
+        if ((payload.ownerHash || '') !== (ownerHash || '') || (ticketRecord.ownerHash || '') !== (ownerHash || '')) {
+            throw new Error('Device ticket does not match this owner.');
         }
 
         if (!payload.vaultKey) {
@@ -1796,22 +2513,44 @@
         return error;
     }
 
-    async function unlockWithDeviceTicket(record, bundlePayload, ticketRecord) {
-        if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload) || bundlePayload.version !== 3) {
+    async function unlockWithDeviceTicket(record, bundlePayload, ticketRecord, ownerHash = '') {
+        if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload) || ![3, 4, 5].includes(bundlePayload.version)) {
             throw new Error('Device ticket is stale.');
         }
 
+        if (ticketRecord.protection === 'passkey-prf' && ticketRecord.ownerCodeBinding !== 'owner-hash-v2') {
+            throw new Error('Saved Passkey access must be refreshed with the token.');
+        }
+
+        if (ticketRecord.protection !== 'local-crypto-key' && (ticketRecord.ownerHash || '') !== (ownerHash || '')) {
+            throw new Error('Saved device access belongs to a different owner.');
+        }
+
         if (ticketRecord.protection === 'local-crypto-key') {
-            return unlockWithLocalCryptoTicket(record, bundlePayload, ticketRecord);
+            return unlockWithLocalCryptoTicket(record, bundlePayload, ticketRecord, ownerHash);
         }
 
         const currentTicket = parseDeviceTicket(ticketRecord.ticket);
         const nextSalt = getRandomBytes(32);
         const prfResults = await getPasskeyPrfOutputs(ticketRecord.credentialId, currentTicket.salt, nextSalt);
+
+        return unlockWithPasskeyPrfResults(record, bundlePayload, ticketRecord, ownerHash, prfResults, nextSalt);
+    }
+
+    async function unlockWithPasskeyPrfResults(record, bundlePayload, ticketRecord, ownerHash, prfResults, nextSalt) {
+        if (!prfResults?.first) {
+            throw new Error('This Passkey does not expose PRF output.');
+        }
+
+        if (ticketRecord.ownerCodeBinding !== 'owner-hash-v2') {
+            throw new Error('Saved Passkey access must be refreshed with the token.');
+        }
+
+        const currentTicket = parseDeviceTicket(ticketRecord.ticket);
         let payload;
         try {
-            payload = await decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfResults.first);
-            validateDeviceTicketPayload(payload, ticketRecord, bundlePayload);
+            payload = await decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfResults.first, ownerHash);
+            validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash);
         } catch (error) {
             throw createDeviceTicketMismatchError('Saved Passkey ticket no longer matches this archive.', error);
         }
@@ -1832,10 +2571,11 @@
                 {
                     taskId: record.id,
                     bundleId: getBundleId(bundlePayload),
+                    ownerHash,
                     credentialId: ticketRecord.credentialId,
                     protection: 'passkey-prf'
                 },
-                prfResults.second ? nextSalt : currentTicket.salt,
+                prfResults.second && nextSalt ? nextSalt : currentTicket.salt,
                 prfResults.second || prfResults.first
             ),
             updatedAt: now
@@ -1846,16 +2586,29 @@
         return vaultKey;
     }
 
-    async function unlockWithLocalCryptoTicket(record, bundlePayload, ticketRecord) {
+    async function unlockWithLocalCryptoTicket(record, bundlePayload, ticketRecord, ownerHash = '') {
         const key = await getLocalDeviceKey(ticketRecord.keyId);
         if (!key) {
             throw new Error('Local device key is missing.');
         }
 
         const currentTicket = parseDeviceTicket(ticketRecord.ticket);
-        const payload = await decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key);
+        const localSecret = await decryptLocalFallbackSecret(record, bundlePayload, ticketRecord, key, ownerHash);
+        const ticketKey = await deriveLocalFallbackTicketKey(
+            localSecret,
+            {
+                taskId: record.id,
+                bundleId: getBundleId(bundlePayload),
+                ownerHash,
+                keyId: ticketRecord.keyId
+            },
+            currentTicket.salt
+        );
+        const payload = await decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, ticketKey, {
+            context: getDeviceTicketContext(ticketRecord, bundlePayload, { ownerHash })
+        });
 
-        validateDeviceTicketPayload(payload, ticketRecord, bundlePayload);
+        validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash);
 
         const now = Date.now();
         const vaultKey = base64urlToBytes(payload.vaultKey);
@@ -1868,6 +2621,17 @@
                 lastUsedAt: now,
                 counter: payload.counter + 1
             };
+            const nextSalt = getRandomBytes(32);
+            const nextTicketKey = await deriveLocalFallbackTicketKey(
+                localSecret,
+                {
+                    taskId: record.id,
+                    bundleId: getBundleId(bundlePayload),
+                    ownerHash,
+                    keyId: ticketRecord.keyId
+                },
+                nextSalt
+            );
             const nextRecord = {
                 ...ticketRecord,
                 ticket: await encryptDeviceTicketPayloadWithKey(
@@ -1875,11 +2639,12 @@
                     {
                         taskId: record.id,
                         bundleId: getBundleId(bundlePayload),
+                        ownerHash,
                         keyId: ticketRecord.keyId,
                         protection: 'local-crypto-key'
                     },
-                    currentTicket.salt,
-                    key
+                    nextSalt,
+                    nextTicketKey
                 ),
                 updatedAt: now
             };
@@ -1912,11 +2677,15 @@
         if (tokenClose) tokenClose.disabled = isBusy;
         if (savedPasskeyButton) savedPasskeyButton.disabled = isBusy;
         if (devicePassInput) devicePassInput.disabled = isBusy || !canAttemptPersistentDevicePass();
+        updateTokenSubmitAvailability();
     }
 
     function setTokenPromptMode(mode, record = state.activeRecord) {
         const isSaveDeviceMode = mode === 'saveDevice';
         const isOpenRecordMode = mode === 'openRecord';
+        const isFallbackOwnerCodeMode = mode === 'fallbackOwnerCode';
+        const isPasskeyOwnerCodeMode = mode === 'passkeyOwnerCode';
+        const isOwnerCodeMode = isFallbackOwnerCodeMode || isPasskeyOwnerCodeMode;
         const isPostTokenMode = isSaveDeviceMode || isOpenRecordMode;
 
         tokenPanel?.setAttribute('data-mode', mode);
@@ -1924,19 +2693,35 @@
 
         if (tokenField) tokenField.hidden = isPostTokenMode;
         if (tokenLabel) tokenLabel.hidden = isPostTokenMode;
-        if (devicePassOption) devicePassOption.hidden = isPostTokenMode;
+        if (tokenLabel && !isPostTokenMode) {
+            tokenLabel.textContent = isOwnerCodeMode ? 'Owner code' : 'Access token';
+        }
+        if (devicePassOption) devicePassOption.hidden = isPostTokenMode || isOwnerCodeMode;
+        if (deviceIdConfirm) deviceIdConfirm.hidden = true;
 
         if (tokenInput) {
             tokenInput.required = !isPostTokenMode;
             if (isPostTokenMode) {
                 tokenInput.blur();
+            } else if (isOwnerCodeMode) {
+                tokenInput.type = 'text';
+                tokenInput.inputMode = 'numeric';
+                tokenInput.autocomplete = 'off';
+                tokenInput.placeholder = 'Owner code';
+            } else {
+                tokenInput.type = 'password';
+                tokenInput.inputMode = 'text';
+                tokenInput.autocomplete = 'one-time-code';
+                tokenInput.placeholder = 'Enter your token';
             }
         }
 
         if (tokenTitle) {
             tokenTitle.textContent = isOpenRecordMode
                 ? 'Open record'
-                : isSaveDeviceMode ? 'Save device access?' : 'Enter your token';
+                : isSaveDeviceMode
+                    ? 'Save device access?'
+                    : isOwnerCodeMode ? 'Confirm owner code' : 'Enter your token';
         }
 
         if (tokenDescription) {
@@ -1944,6 +2729,10 @@
                 ? 'Device access is saved. Open the record in a new tab to continue.'
                 : isSaveDeviceMode
                     ? 'Save a Passkey for this record. Windows Security may ask you to confirm; if it cannot complete, this browser will save an encrypted local device ticket instead.'
+                : isPasskeyOwnerCodeMode
+                    ? 'Passkey accepted. Enter the top-left owner code to finish decrypting this saved device ticket.'
+                : isFallbackOwnerCodeMode
+                    ? 'Enter the top-left owner code. It is used with this browser key to unlock the saved local fallback ticket.'
                 : record
                     ? `Use the access token for ${record.label}. A successful unlock can create an encrypted local device ticket.`
                     : 'Use the access token for this record. The archive is decrypted locally in your browser and opened in a new tab.';
@@ -1952,7 +2741,7 @@
         if (tokenSubmit) {
             tokenSubmit.textContent = isOpenRecordMode
                 ? 'Open record'
-                : isSaveDeviceMode ? 'Save Passkey' : 'Continue with token';
+                : isSaveDeviceMode ? 'Save Passkey' : isOwnerCodeMode ? 'Continue with owner code' : 'Continue with token';
         }
 
         if (tokenCancel) {
@@ -1966,8 +2755,17 @@
                 ? 'The next click opens the decrypted record from this browser session.'
                 : isSaveDeviceMode
                     ? 'This happens after the token has been verified, so a failed Passkey attempt will not block opening the record.'
+                : isPasskeyOwnerCodeMode
+                    ? 'The owner code is part of the saved Passkey ticket key and the final archive decryption key.'
+                : isFallbackOwnerCodeMode
+                    ? 'The local fallback ticket is limited to 5 uses or 24 hours. The owner code is part of the ticket decryption key.'
                 : defaultTokenNote;
         }
+
+        const ownerVerification = state.pendingUnlock?.ownerVerification || state.pendingSavedAccess?.ownerVerification || null;
+        renderOwnerVerification(isOpenRecordMode ? ownerVerification : null);
+        updateDeviceIdConfirmation();
+        updateTokenSubmitAvailability();
     }
 
     function showDeviceSavePrompt(pendingUnlock) {
@@ -2032,7 +2830,7 @@
         state.pendingUnlock = null;
 
         if ((rememberInSession || pendingUnlock.rememberInSession) && pendingUnlock.vaultKey) {
-            setSessionVaultKey(pendingUnlock.record, pendingUnlock.bundlePayload, pendingUnlock.vaultKey);
+            setSessionVaultKey(pendingUnlock.record, pendingUnlock.bundlePayload, pendingUnlock.vaultKey, pendingUnlock.ownerHash || '');
         }
 
         viewerWindow.location.replace(pendingUnlock.viewerUrl);
@@ -2077,6 +2875,11 @@
             await skipPendingDeviceAccess();
             return;
         }
+        if (!pendingUnlock.ownerVerification?.ownerVerified) {
+            setTokenStatus('Device access was not saved because archive ownership could not be verified.', 'error');
+            showOpenRecordPrompt(pendingUnlock, 'Open without saving device access.');
+            return;
+        }
 
         setUnlockBusy(true);
         setTokenStatus(
@@ -2090,7 +2893,8 @@
             const ticketResult = await createDeviceTicket(
                 pendingUnlock.record,
                 pendingUnlock.bundlePayload,
-                pendingUnlock.vaultKey
+                pendingUnlock.vaultKey,
+                pendingUnlock.ownerHash || ''
             );
 
             finishDeviceTicketSave(pendingUnlock, ticketResult);
@@ -2126,7 +2930,8 @@
         event.preventDefault();
 
         const record = state.activeRecord;
-        if (!record || !getSavedPasskeyTicket(record)) return;
+        const savedPasskeyTicket = getSavedPasskeyTicket(record);
+        if (!record || !canUseSavedDeviceTicket(savedPasskeyTicket)) return;
 
         setUnlockBusy(true);
         setTokenStatus('Opening Windows Security...', 'success');
@@ -2140,37 +2945,29 @@
                 throw new Error('Saved Passkey access is no longer available.');
             }
 
-            let vaultKey;
-            try {
-                vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord);
-            } catch (error) {
-                if (error?.deviceTicketMismatch) {
-                    await deleteDeviceTicket(record.id, 'passkey-prf');
-                }
-
-                throw error;
+            if (!canUseSavedDeviceTicket(ticketRecord)) {
+                throw new Error('Saved Passkey access must be refreshed with the token.');
             }
 
-            let unlockResult;
-            try {
-                unlockResult = await decryptBundleWithVaultKey(bundlePayload, vaultKey);
-            } catch (error) {
-                await deleteDeviceTicket(record.id, 'passkey-prf');
-                throw createDeviceTicketMismatchError('Saved Passkey ticket no longer opens this archive.', error);
-            }
-            const fileMap = unpackArchive(unlockResult.archiveBytes);
+            const currentTicket = parseDeviceTicket(ticketRecord.ticket);
+            const nextSalt = getRandomBytes(32);
+            const prfResults = await getPasskeyPrfOutputs(ticketRecord.credentialId, currentTicket.salt, nextSalt);
 
-            state.pendingSavedAccess = {
+            state.pendingPasskeyAccess = {
                 record,
                 bundlePayload,
-                viewerUrl: buildViewerUrl(record, fileMap),
-                readyToOpen: true
+                ticketRecord,
+                prfResults,
+                nextSalt
             };
 
-            setTokenPromptMode('openRecord', record);
-            setTokenStatus('Saved Passkey verified. Click Open record to continue.', 'success');
+            if (tokenInput) {
+                tokenInput.value = '';
+            }
+            setTokenPromptMode('passkeyOwnerCode', record);
+            setTokenStatus('Passkey accepted. Type the visible owner code to continue.', 'success');
             window.setTimeout(() => {
-                tokenSubmit?.focus({ preventScroll: true });
+                tokenInput?.focus({ preventScroll: true });
             }, reduceMotion ? 0 : 120);
         } catch (error) {
             console.warn('Saved Passkey access failed:', error);
@@ -2183,7 +2980,177 @@
         }
     }
 
+    async function unlockPendingPasskeyAccess(event) {
+        event.preventDefault();
+
+        const pendingPasskey = state.pendingPasskeyAccess;
+        if (!pendingPasskey || !tokenInput) return;
+
+        const ownerCode = tokenInput.value.replace(/\D/g, '');
+        if (!ownerCode) {
+            setTokenStatus('Type the visible owner code to unlock saved Passkey access.', 'error');
+            tokenInput.focus({ preventScroll: true });
+            return;
+        }
+
+        const ownerCodeCheck = await verifyTypedOwnerCode(pendingPasskey.bundlePayload, ownerCode);
+        if (!ownerCodeCheck.ok) {
+            showOwnerCodeRiskWarning(ownerCodeCheck);
+            tokenInput.focus({ preventScroll: true });
+            tokenInput.select();
+            return;
+        }
+
+        const { record, bundlePayload, ticketRecord, prfResults, nextSalt } = pendingPasskey;
+        setUnlockBusy(true);
+        setTokenStatus('Decrypting saved Passkey access...', 'success');
+
+        try {
+            if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload)) {
+                await deleteDeviceTicket(record.id, 'passkey-prf');
+                throw new Error('Saved Passkey access is no longer available.');
+            }
+
+            const ownerHash = ownerCodeCheck.ownerHash || await getClaimedOwnerHash(bundlePayload, ownerCodeCheck.typedCode);
+            if ((ticketRecord.ownerHash || '') !== (ownerHash || '')) {
+                showOwnerCodeRiskWarning(ownerCodeCheck);
+                throw new Error('Saved Passkey access belongs to a different owner.');
+            }
+
+            let vaultKey;
+            try {
+                vaultKey = await unlockWithPasskeyPrfResults(record, bundlePayload, ticketRecord, ownerHash || '', prfResults, nextSalt);
+            } catch (error) {
+                if (error?.deviceTicketMismatch) {
+                    await deleteDeviceTicket(record.id, 'passkey-prf');
+                }
+
+                throw error;
+            }
+
+            let unlockResult;
+            try {
+                unlockResult = await decryptBundleWithVaultKey(bundlePayload, vaultKey, ownerHash);
+            } catch (error) {
+                await deleteDeviceTicket(record.id, 'passkey-prf');
+                throw createDeviceTicketMismatchError('Saved Passkey ticket no longer opens this archive.', error);
+            }
+            const fileMap = unpackArchive(unlockResult.archiveBytes);
+            const ownerVerification = await verifyBundleOwner(record, bundlePayload, fileMap, ownerHash);
+            assertOwnerVerification(ownerVerification);
+
+            state.pendingPasskeyAccess = null;
+            state.pendingSavedAccess = {
+                record,
+                bundlePayload,
+                ownerHash,
+                ownerVerification,
+                viewerUrl: buildViewerUrl(record, fileMap, ownerVerification),
+                readyToOpen: true
+            };
+
+            setTokenPromptMode('openRecord', record);
+            setTokenStatus('Saved Passkey verified. Click Open record to continue.', 'success');
+            window.setTimeout(() => {
+                tokenSubmit?.focus({ preventScroll: true });
+            }, reduceMotion ? 0 : 120);
+        } catch (error) {
+            console.warn('Saved Passkey owner code unlock failed:', error);
+            setTokenStatus(
+                error instanceof Error
+                    ? `${error.message} Recheck the owner code or enter the token again.`
+                    : 'Saved Passkey access failed. Recheck the owner code or enter the token again.',
+                'error'
+            );
+            tokenInput.focus({ preventScroll: true });
+            tokenInput.select();
+        } finally {
+            setUnlockBusy(false);
+        }
+    }
+
+    async function unlockPendingLocalFallbackAccess(event) {
+        event.preventDefault();
+
+        const pendingFallback = state.pendingFallbackAccess;
+        if (!pendingFallback || !tokenInput) return;
+
+        const ownerCode = tokenInput.value.replace(/\D/g, '');
+        if (!ownerCode) {
+            setTokenStatus('Type the visible owner code to unlock saved local access.', 'error');
+            tokenInput.focus({ preventScroll: true });
+            return;
+        }
+
+        const { record } = pendingFallback;
+        let bundlePayload;
+
+        try {
+            bundlePayload = await fetchBundlePayload(record);
+        } catch (error) {
+            setTokenStatus(error instanceof Error ? error.message : 'Archive bundle is unavailable.', 'error');
+            tokenInput.focus({ preventScroll: true });
+            tokenInput.select();
+            return;
+        }
+
+        const ownerCodeCheck = await verifyTypedOwnerCode(bundlePayload, ownerCode);
+        if (!ownerCodeCheck.ok) {
+            showOwnerCodeRiskWarning(ownerCodeCheck);
+            tokenInput.focus({ preventScroll: true });
+            tokenInput.select();
+            return;
+        }
+
+        const viewerWindow = openViewerWindow();
+        if (!viewerWindow) {
+            setTokenStatus('Popup blocked. Allow popups for this site first, then try again.', 'error');
+            return;
+        }
+
+        writeViewerPlaceholder(viewerWindow, record.label);
+        setUnlockBusy(true);
+        setTokenStatus('Decrypting saved local access...', 'success');
+
+        try {
+            const ticketRecord = getSavedLocalFallbackTicket(record);
+            if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload)) {
+                if (ticketRecord) {
+                    await deleteDeviceTicket(record.id, 'local-crypto-key');
+                }
+                throw new Error('Saved local access is no longer available.');
+            }
+
+            const ownerHash = ownerCodeCheck.ownerHash || await getClaimedOwnerHash(bundlePayload, ownerCodeCheck.typedCode);
+            const vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord, ownerHash || '');
+            await openViewerFromVaultKey(record, bundlePayload, vaultKey, viewerWindow, { ownerHash });
+        } catch (error) {
+            viewerWindow.close();
+            console.warn('Saved local access failed:', error);
+            setTokenStatus(
+                error instanceof Error
+                    ? `${error.message} Recheck the owner code or enter the token again.`
+                    : 'Saved local access failed. Recheck the owner code or enter the token again.',
+                'error'
+            );
+            tokenInput.focus({ preventScroll: true });
+            tokenInput.select();
+        } finally {
+            setUnlockBusy(false);
+        }
+    }
+
     function handleTokenCancel() {
+        if (state.pendingPasskeyAccess && !state.unlocking) {
+            closeTokenPrompt();
+            return;
+        }
+
+        if (state.pendingFallbackAccess && !state.unlocking) {
+            closeTokenPrompt();
+            return;
+        }
+
         if (state.pendingSavedAccess?.readyToOpen && !state.unlocking) {
             closeTokenPrompt();
             return;
@@ -2203,6 +3170,16 @@
     }
 
     function handleTokenClose() {
+        if (state.pendingPasskeyAccess && !state.unlocking) {
+            closeTokenPrompt();
+            return;
+        }
+
+        if (state.pendingFallbackAccess && !state.unlocking) {
+            closeTokenPrompt();
+            return;
+        }
+
         if (state.pendingSavedAccess && !state.unlocking) {
             closeTokenPrompt();
             return;
@@ -2212,6 +3189,16 @@
     }
 
     function handleTokenFormSubmit(event) {
+        if (state.pendingPasskeyAccess) {
+            unlockPendingPasskeyAccess(event);
+            return;
+        }
+
+        if (state.pendingFallbackAccess) {
+            unlockPendingLocalFallbackAccess(event);
+            return;
+        }
+
         if (state.pendingSavedAccess) {
             if (state.pendingSavedAccess.readyToOpen) {
                 event.preventDefault();
@@ -2234,6 +3221,43 @@
         unlockActiveRecord(event);
     }
 
+    function isOwnerCodePromptMode() {
+        return ['fallbackOwnerCode', 'passkeyOwnerCode'].includes(tokenPanel?.getAttribute('data-mode'));
+    }
+
+    function handleTokenInput() {
+        if (!tokenInput || !isOwnerCodePromptMode()) return;
+
+        tokenInput.value = tokenInput.value.replace(/\D/g, '');
+    }
+
+    function blockFallbackOwnerCodeTransfer(event) {
+        if (!isOwnerCodePromptMode()) return;
+
+        event.preventDefault();
+        setTokenStatus('Type the visible owner code with the keyboard.', 'error');
+    }
+
+    function handleDevicePassToggle() {
+        updateDeviceIdConfirmation();
+        updateTokenSubmitAvailability();
+        if (devicePassInput?.checked) {
+            window.setTimeout(() => deviceIdInput?.focus({ preventScroll: true }), 0);
+        }
+    }
+
+    function handleDeviceIdInput() {
+        if (!deviceIdInput) return;
+
+        deviceIdInput.value = deviceIdInput.value.replace(/\D/g, '');
+        updateTokenSubmitAvailability();
+    }
+
+    function blockDeviceIdTransfer(event) {
+        event.preventDefault();
+        setTokenStatus('Type the visible owner code with the keyboard.', 'error');
+    }
+
     function restoreFocus() {
         if (lastFocusedElement instanceof HTMLElement) {
             lastFocusedElement.focus({ preventScroll: true });
@@ -2241,6 +3265,10 @@
     }
 
     function getActiveDialogRoot() {
+        if (ownerRiskDialog && !ownerRiskDialog.hidden) {
+            return ownerRiskDialog;
+        }
+
         if (tokenOverlay && !tokenOverlay.hidden) {
             return tokenPanel;
         }
@@ -2264,6 +3292,7 @@
 
         if (!tokenOverlay || tokenOverlay.hidden) return;
 
+        closeOwnerCodeRiskDialog({ restoreFocus: false });
         window.clearTimeout(state.tokenTimer);
         tokenOverlay.classList.remove('is-open');
         tokenOverlay.setAttribute('aria-hidden', 'true');
@@ -2272,6 +3301,8 @@
             tokenOverlay.hidden = true;
             state.pendingUnlock = null;
             state.pendingSavedAccess = null;
+            state.pendingPasskeyAccess = null;
+            state.pendingFallbackAccess = null;
             setTokenPromptMode('token', state.activeRecord);
             state.activeRecord = null;
             setTokenStatus('');
@@ -2297,18 +3328,61 @@
 
         state.pendingUnlock = null;
         state.pendingSavedAccess = null;
+        state.pendingPasskeyAccess = null;
+        state.pendingFallbackAccess = null;
         state.activeRecord = record;
         if (tokenMeta) {
             tokenMeta.textContent = `${record.label} · ${record.id.toUpperCase()}`;
         }
         setTokenStatus('');
         if (tokenForm) tokenForm.reset();
+        if (deviceIdInput) deviceIdInput.value = '';
+        renderOwnerVerification(null);
         setTokenPromptMode('token', record);
         setUnlockBusy(false);
         configureDevicePassOption();
         if (canAttemptPasskeyPrf()) {
             getPasskeyClientCapabilities();
         }
+
+        tokenOverlay.hidden = false;
+        tokenOverlay.setAttribute('aria-hidden', 'false');
+
+        requestAnimationFrame(() => {
+            tokenOverlay.classList.add('is-open');
+        });
+
+        if (reduceMotion) {
+            tokenInput.focus({ preventScroll: true });
+            return;
+        }
+
+        window.setTimeout(() => {
+            tokenInput.focus({ preventScroll: true });
+        }, 120);
+    }
+
+    function openFallbackOwnerCodePrompt(recordId) {
+        if (!tokenOverlay || !tokenPanel || !tokenTitle || !tokenInput) return;
+
+        const record = state.projects.find(project => project.id === recordId);
+        if (!record) return;
+
+        state.pendingUnlock = null;
+        state.pendingSavedAccess = null;
+        state.pendingPasskeyAccess = null;
+        state.pendingFallbackAccess = { record };
+        state.activeRecord = record;
+        if (tokenMeta) {
+            tokenMeta.textContent = `${record.label} · ${record.id.toUpperCase()}`;
+        }
+        setTokenStatus('');
+        if (tokenForm) tokenForm.reset();
+        if (tokenInput) tokenInput.value = '';
+        if (deviceIdInput) deviceIdInput.value = '';
+        renderOwnerVerification(null);
+        setTokenPromptMode('fallbackOwnerCode', record);
+        setUnlockBusy(false);
 
         tokenOverlay.hidden = false;
         tokenOverlay.setAttribute('aria-hidden', 'false');
@@ -2521,12 +3595,15 @@
 
     async function openViewerFromVaultKey(record, bundlePayload, vaultKey, viewerWindow, options = {}) {
         const { rememberInSession = false } = options;
-        const unlockResult = await decryptBundleWithVaultKey(bundlePayload, vaultKey);
+        const ownerHash = options.ownerHash || await getClaimedOwnerHash(bundlePayload);
+        const unlockResult = await decryptBundleWithVaultKey(bundlePayload, vaultKey, ownerHash);
         const fileMap = unpackArchive(unlockResult.archiveBytes);
-        const viewerUrl = buildViewerUrl(record, fileMap);
+        const ownerVerification = await verifyBundleOwner(record, bundlePayload, fileMap, ownerHash);
+        assertOwnerVerification(ownerVerification);
+        const viewerUrl = buildViewerUrl(record, fileMap, ownerVerification);
 
         if (rememberInSession) {
-            setSessionVaultKey(record, bundlePayload, vaultKey);
+            setSessionVaultKey(record, bundlePayload, vaultKey, ownerHash || '');
         }
 
         viewerWindow.location.replace(viewerUrl);
@@ -2534,13 +3611,19 @@
         closeProjects({ restorePageFocus: false });
     }
 
-    async function trySavedAccess(record, viewerWindow) {
+    async function trySavedAccess(record, viewerWindow, options = {}) {
+        const { allowLocalFallback = false } = options;
         const bundlePayload = await fetchBundlePayload(record);
-        const sessionVaultKey = getSessionVaultKey(record, bundlePayload);
+        const ownerHash = await getClaimedOwnerHash(bundlePayload);
+        const sessionVaultKey = getSessionVaultKey(record, bundlePayload, ownerHash || '');
 
         if (sessionVaultKey) {
-            await openViewerFromVaultKey(record, bundlePayload, sessionVaultKey, viewerWindow);
+            await openViewerFromVaultKey(record, bundlePayload, sessionVaultKey, viewerWindow, { ownerHash });
             return;
+        }
+
+        if (!allowLocalFallback) {
+            throw new Error('No saved session access is available.');
         }
 
         const ticketRecord = getSavedLocalFallbackTicket(record);
@@ -2549,12 +3632,16 @@
             throw new Error('Saved local access is no longer available.');
         }
 
+        if (ticketRecord && (ticketRecord.ownerHash || '') !== (ownerHash || '')) {
+            throw new Error('Saved local access belongs to a different owner.');
+        }
+
         const hasMatchingTicket = canUseSavedDeviceTicket(ticketRecord);
 
         if (hasMatchingTicket) {
             let vaultKey;
             try {
-                vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord);
+                vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord, ownerHash || '');
             } catch (error) {
                 if (!(error && error.name === 'NotAllowedError')) {
                     await deleteDeviceTicket(record.id, 'local-crypto-key');
@@ -2563,7 +3650,7 @@
                 throw error;
             }
 
-            await openViewerFromVaultKey(record, bundlePayload, vaultKey, viewerWindow);
+            await openViewerFromVaultKey(record, bundlePayload, vaultKey, viewerWindow, { ownerHash });
             return;
         }
 
@@ -2576,18 +3663,23 @@
 
         const passkeyTicket = getSavedPasskeyTicket(record);
         const fallbackTicket = getSavedLocalFallbackTicket(record);
-        const ticketRecord = getSavedDeviceTicket(record);
         const hasSessionAccess = state.sessionVaultKeys.has(record.id);
-        const hasSavedAccess = hasSessionAccess || canUseSavedDeviceTicket(ticketRecord);
+        const hasPasskeyAccess = canUseSavedDeviceTicket(passkeyTicket);
+        const hasFallbackAccess = canUseSavedDeviceTicket(fallbackTicket);
 
-        if (!hasSavedAccess) {
+        if (!hasSessionAccess && hasPasskeyAccess) {
             openTokenPrompt(record.id);
+            setTokenStatus('Saved Passkey unlock is available below the token field.', 'success');
             return;
         }
 
-        if (!hasSessionAccess && passkeyTicket && !fallbackTicket) {
+        if (!hasSessionAccess && hasFallbackAccess) {
+            openFallbackOwnerCodePrompt(record.id);
+            return;
+        }
+
+        if (!hasSessionAccess) {
             openTokenPrompt(record.id);
-            setTokenStatus('Saved Passkey unlock is available below the token field.', 'success');
             return;
         }
 
@@ -2604,7 +3696,7 @@
             await trySavedAccess(record, viewerWindow);
         } catch (error) {
             viewerWindow.close();
-            if (passkeyTicket) {
+            if (hasPasskeyAccess) {
                 openTokenPrompt(record.id);
                 setTokenStatus(
                     error instanceof Error
@@ -2631,35 +3723,55 @@
             return;
         }
 
-        const shouldRememberDevice = Boolean(
-            devicePassInput &&
-            !devicePassInput.disabled &&
-            devicePassInput.checked
-        );
+        clearClipboardSilently();
 
         setUnlockBusy(true);
-        setTokenStatus('Decrypting archive...', 'success');
+        setTokenStatus(devicePassInput?.checked ? 'Checking owner code...' : 'Decrypting archive...', 'success');
 
         try {
             const bundlePayload = await fetchBundlePayload(state.activeRecord);
             configureDevicePassOption(bundlePayload, { resetChoice: false });
+            const shouldRememberDevice = Boolean(
+                devicePassInput &&
+                !devicePassInput.disabled &&
+                devicePassInput.checked
+            );
 
-            const unlockResult = await decryptBundleWithToken(bundlePayload, token);
+            if (shouldRememberDevice) {
+                const ownerCodeCheck = await verifyRememberOwnerCode(bundlePayload);
+                if (!ownerCodeCheck.ok) {
+                    showOwnerCodeRiskWarning(ownerCodeCheck);
+                    deviceIdInput?.focus({ preventScroll: true });
+                    deviceIdInput?.select();
+                    return;
+                }
+            }
+
+            setTokenStatus('Decrypting archive...', 'success');
+            const ownerHash = await getClaimedOwnerHash(bundlePayload);
+            const unlockResult = await decryptBundleWithToken(bundlePayload, token, ownerHash);
             const fileMap = unpackArchive(unlockResult.archiveBytes);
-            const viewerUrl = buildViewerUrl(state.activeRecord, fileMap);
+            const ownerVerification = await verifyBundleOwner(state.activeRecord, bundlePayload, fileMap, ownerHash);
+            assertOwnerVerification(ownerVerification);
+            const viewerUrl = buildViewerUrl(state.activeRecord, fileMap, ownerVerification);
+            if (tokenInput) {
+                tokenInput.value = '';
+            }
 
-            if (shouldRememberDevice && unlockResult.vaultKey && canAttemptPersistentDevicePass()) {
+            if (shouldRememberDevice && unlockResult.vaultKey && canAttemptPersistentDevicePass() && ownerVerification.ownerVerified) {
                 showDeviceSavePrompt({
                     record: state.activeRecord,
                     bundlePayload,
                     vaultKey: unlockResult.vaultKey,
+                    ownerHash,
+                    ownerVerification,
                     viewerUrl,
                     viewerWindow: null
                 });
                 return;
             }
 
-            if (!shouldRememberDevice) {
+            if (!shouldRememberDevice || !ownerVerification.ownerVerified) {
                 deleteSessionVaultKey(state.activeRecord);
                 await deleteLocalFallbackTicket(state.activeRecord);
             }
@@ -2668,9 +3780,11 @@
                 record: state.activeRecord,
                 bundlePayload,
                 vaultKey: unlockResult.vaultKey,
+                ownerHash,
+                ownerVerification,
                 viewerUrl,
                 viewerWindow: null
-            });
+            }, ownerVerification.ownerVerified ? 'Token accepted. Click Open record to continue.' : 'Token accepted, but owner verification needs attention.');
         } catch (error) {
             setTokenStatus(error instanceof Error ? error.message : 'Unable to unlock this record.', 'error');
             tokenInput.focus({ preventScroll: true });
@@ -2681,7 +3795,12 @@
     }
 
     function handleGlobalKeydown(event) {
-        if (tokenOverlay && !tokenOverlay.hidden) {
+        if (ownerRiskDialog && !ownerRiskDialog.hidden) {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeOwnerCodeRiskDialog();
+            }
+        } else if (tokenOverlay && !tokenOverlay.hidden) {
             if (event.key === 'Escape' && !state.unlocking) {
                 handleTokenClose();
                 return;
@@ -2747,6 +3866,13 @@
             }
         });
         savedPasskeyButton?.addEventListener('click', useSavedPasskeyAccess);
+        devicePassInput?.addEventListener('change', handleDevicePassToggle);
+        deviceIdInput?.addEventListener('input', handleDeviceIdInput);
+        deviceIdInput?.addEventListener('paste', blockDeviceIdTransfer);
+        deviceIdInput?.addEventListener('drop', blockDeviceIdTransfer);
+        tokenInput?.addEventListener('input', handleTokenInput);
+        tokenInput?.addEventListener('paste', blockFallbackOwnerCodeTransfer);
+        tokenInput?.addEventListener('drop', blockFallbackOwnerCodeTransfer);
         tokenForm?.addEventListener('submit', handleTokenFormSubmit);
 
         document.addEventListener('keydown', handleGlobalKeydown);
@@ -2758,7 +3884,7 @@
         const divider = document.querySelector('.divider');
         const tagline = document.querySelector('.tagline');
         const links = document.querySelector('.links');
-        const studentId = document.querySelector('.student-id');
+        const ownerCode = document.querySelector('.owner-code');
 
         await animateIn(greeting, 1400, 300);
         await animateIn(name, 1600, 100);
@@ -2788,9 +3914,9 @@
             window.particleSystem.enableMouseSpawn();
         }
 
-        if (studentId) {
-            studentId.style.transition = reduceMotion ? 'none' : 'opacity 3s ease';
-            studentId.style.opacity = '1';
+        if (ownerCode) {
+            ownerCode.style.transition = reduceMotion ? 'none' : 'opacity 3s ease';
+            ownerCode.style.opacity = '1';
         }
 
         if (tagline) {
