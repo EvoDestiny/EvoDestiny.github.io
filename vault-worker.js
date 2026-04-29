@@ -13,6 +13,18 @@ function base64ToBytes(base64Value) {
     return bytes;
 }
 
+function stableStringify(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map(stableStringify).join(',')}]`;
+    }
+
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+    }
+
+    return JSON.stringify(value);
+}
+
 function createWorkerError(message) {
     const error = new Error(message);
     error.isVaultWorkerError = true;
@@ -51,6 +63,29 @@ function getSlotAad(bundlePayload, slot, ownerHash) {
     }
 
     return textEncoder.encode(`evo-vault-slot:${bundlePayload.taskId}:${bundlePayload.bundleId}:${slot.id}`);
+}
+
+function getDeviceGrantContext(bundlePayload, ownerHash) {
+    const owner = bundlePayload && bundlePayload.owner ? bundlePayload.owner : {};
+    const ownerSignature = bundlePayload && bundlePayload.ownerSignature ? bundlePayload.ownerSignature : {};
+
+    return {
+        version: 1,
+        taskId: bundlePayload && bundlePayload.taskId ? bundlePayload.taskId : '',
+        bundleId: bundlePayload && bundlePayload.bundleId ? bundlePayload.bundleId : '',
+        ownerHash: ownerHash || '',
+        canonicalSite: owner.canonicalSite || '',
+        canonicalRepo: owner.canonicalRepo || '',
+        publicKeyFingerprint: ownerSignature.publicKeyFingerprint || ''
+    };
+}
+
+function getDeviceGrantAad(bundlePayload, ownerHash) {
+    if (!bundlePayload || bundlePayload.version < 6 || !ownerHash) {
+        throw createWorkerError('Private device authorization is unavailable.');
+    }
+
+    return textEncoder.encode(`evo-vault-device-grant-v1:${stableStringify(getDeviceGrantContext(bundlePayload, ownerHash))}`);
 }
 
 async function importAesKey(keyBytes, usages) {
@@ -131,7 +166,7 @@ function validateLegacyBundlePayload(bundlePayload) {
 }
 
 function validateVaultBundlePayload(bundlePayload) {
-    if (!bundlePayload || ![3, 4, 5].includes(bundlePayload.version)) {
+    if (!bundlePayload || ![3, 4, 5, 6].includes(bundlePayload.version)) {
         throw createWorkerError('Archive format is unsupported.');
     }
 
@@ -153,6 +188,31 @@ function validateVaultBundlePayload(bundlePayload) {
             throw createWorkerError('Archive key derivation is unavailable.');
         }
     }
+}
+
+function validateDeviceGrant(bundlePayload, ownerHash) {
+    validateVaultBundlePayload(bundlePayload);
+
+    const grant = bundlePayload.deviceGrant;
+    if (
+        bundlePayload.version < 6 ||
+        !grant ||
+        grant.type !== 'private-token-argon2id' ||
+        grant.cipher !== 'AES-GCM' ||
+        !grant.kdf ||
+        grant.kdf.name !== 'Argon2id' ||
+        !grant.iv ||
+        !grant.wrappedDeviceGrantKey
+    ) {
+        throw createWorkerError('Private device authorization is unavailable.');
+    }
+
+    const expectedContext = getDeviceGrantContext(bundlePayload, ownerHash);
+    if (grant.context && stableStringify(grant.context) !== stableStringify(expectedContext)) {
+        throw createWorkerError('Private device authorization is bound to a different site.');
+    }
+
+    return grant;
 }
 
 function getTokenSlot(bundlePayload) {
@@ -210,13 +270,30 @@ async function decryptVaultBundle(bundlePayload, vaultKeyBytes, ownerHash) {
     );
 }
 
+async function unwrapDeviceGrantKey(bundlePayload, privateToken, ownerHash) {
+    const grant = validateDeviceGrant(bundlePayload, ownerHash);
+    const grantKey = await deriveTokenKey(privateToken, grant.kdf);
+    const deviceGrantKey = await self.crypto.subtle.decrypt(
+        {
+            name: 'AES-GCM',
+            iv: base64ToBytes(grant.iv),
+            additionalData: getDeviceGrantAad(bundlePayload, ownerHash)
+        },
+        grantKey,
+        base64ToBytes(grant.wrappedDeviceGrantKey)
+    );
+
+    return new Uint8Array(deviceGrantKey);
+}
+
 self.addEventListener('message', async event => {
-    const { id, mode = 'token', token, vaultKey, bundlePayload, ownerHash } = event.data || {};
+    const { id, mode = 'token', token, privateToken, vaultKey, bundlePayload, ownerHash } = event.data || {};
     if (typeof id !== 'number') return;
 
     try {
         let plaintext;
         let unwrappedVaultKey = null;
+        let deviceGrantKey = null;
 
         if (bundlePayload && bundlePayload.version === 2) {
             if (mode !== 'token') {
@@ -224,6 +301,8 @@ self.addEventListener('message', async event => {
             }
 
             plaintext = await decryptLegacyBundle(bundlePayload, token);
+        } else if (mode === 'deviceGrant') {
+            deviceGrantKey = await unwrapDeviceGrantKey(bundlePayload, privateToken, ownerHash);
         } else if (mode === 'vaultKey') {
             plaintext = await decryptVaultBundle(bundlePayload, new Uint8Array(vaultKey), ownerHash);
         } else {
@@ -231,6 +310,19 @@ self.addEventListener('message', async event => {
             plaintext = await decryptVaultBundle(bundlePayload, unwrappedVaultKey, ownerHash);
         }
 
+        if (mode === 'deviceGrant') {
+            self.postMessage(
+                {
+                    id,
+                    ok: true,
+                    deviceGrantKey: deviceGrantKey.buffer
+                },
+                [deviceGrantKey.buffer]
+            );
+            return;
+        }
+
+        const transferables = unwrappedVaultKey ? [plaintext, unwrappedVaultKey.buffer] : [plaintext];
         self.postMessage(
             {
                 id,
@@ -238,7 +330,7 @@ self.addEventListener('message', async event => {
                 archiveBytes: plaintext,
                 vaultKey: unwrappedVaultKey ? unwrappedVaultKey.buffer : null
             },
-            unwrappedVaultKey ? [plaintext, unwrappedVaultKey.buffer] : [plaintext]
+            transferables
         );
     } catch (error) {
         const message = error && error.isVaultWorkerError

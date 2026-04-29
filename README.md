@@ -45,13 +45,13 @@
 8. 验证档案内部 owner 声明和 Ed25519 签名
 9. 用临时地址把页面打开，并显示档案归属验证信息
 
-如果用户选择绑定设备，浏览器会优先尝试用一个站点级 Passkey PRF 保护本地设备 ticket。第一次成功保存 PRF 时会创建一个系统 Passkey；后续其他 task 会复用同一个 Passkey，只为各自的 `vaultKey` 保存独立的本地 ticket，不再为每个 task 创建新的系统凭证。PRF ticket 会绑定当前 archive 的 owner binding；使用已保存 Passkey 时，Windows Security 通过后还必须手动输入左上角 owner code，owner code 验签通过后才会参与派生 ticket key 和正文密钥。PRF ticket 是当前设备上的长期授权，不受 5 次或 24 小时限制；如果当前浏览器、认证器或用户授权导致 PRF 不可用，则退到 IndexedDB 中不可导出的 Web Crypto `CryptoKey`。降级 ticket 本身是一段本地密文，会写入 IndexedDB，并以同样的密文在 localStorage 中保留一份镜像；降级方案最多用于 5 次或 24 小时。持久本地存储不可用时，才只保留当前页面会话内的免输入缓存。
+如果用户选择绑定设备，浏览器还会要求输入额外的 `private token`。`access token` 只负责本次解封 archive，不能单独创建设备授权；`private token` 会先解开封包里的 `deviceGrantKey`，然后把这段 grant key 通过 Passkey PRF 或本地不可导出的 fallback `CryptoKey` 再封成 `deviceGrantTicket`。真正保存 `vaultKey` 的设备 ticket 仍会把 `deviceGrantKey` 混入 HKDF 派生材料，所以保存阶段如果 `private token` 错误，就无法生成后续可解开的 Passkey/fallback ticket。第一次成功保存 PRF 时会创建一个系统 Passkey；后续其他 task 会复用同一个 Passkey，只为各自的 `vaultKey` 保存独立的本地 ticket，不再为每个 task 创建新的系统凭证。PRF ticket 会绑定当前 archive 的 owner binding、canonical site/repo、公钥指纹、当前 origin 和 private token 派生出的 device grant；使用已保存 Passkey 时，Windows Security 通过后只需要手动输入左上角 owner code。PRF ticket 是当前设备上的长期授权，不受 5 次或 24 小时限制；如果当前浏览器、认证器或用户授权导致 PRF 不可用，则退到 IndexedDB 中不可导出的 Web Crypto `CryptoKey`。降级 ticket 本身是一段本地密文，会写入 IndexedDB，并以同样的密文在 localStorage 中保留一份镜像；降级方案最多用于 5 次或 24 小时。持久本地存储不可用时，才只保留当前页面会话内的免输入缓存。
 
-降级方案不会再自动打开档案。页面只显示 owner code 输入入口，输入内容必须和左上角可见归属编号一致，并且该编号重新计算出的 owner binding 和 Ed25519 签名必须匹配封包。保存降级 ticket 时，浏览器会先用不可导出的本地 `CryptoKey` 保护一段随机 `localSecret`，再用 `localSecret + owner binding + task/bundle/key` 通过 HKDF 派生真正的 ticket 解密密钥。因此输错编号、改左上角编号、换封包或换 origin 都不能解开本地降级 ticket；旧版没有 `localSecret` 绑定标记的降级 ticket 会被视为需要重新输入 token 刷新。
+降级方案不会再自动打开档案。页面会要求 owner code，owner code 必须和左上角可见归属编号一致，并且该编号重新计算出的 owner binding 和 Ed25519 签名必须匹配封包。保存降级 ticket 时，浏览器会先用不可导出的本地 `CryptoKey` 保护一段随机 `localSecret` 和 private-token 解出的 `deviceGrantKey`，再用 `localSecret + deviceGrantKey + owner binding + task/bundle/key` 通过 HKDF 派生真正的 ticket 解密密钥。因此输错编号、改左上角编号、换封包、换 origin，或保存时没有正确 private token，都不能解开本地降级 ticket；旧版没有 `deviceGrantTicket` 的降级 ticket 会被视为需要重新输入 access token 和 private token 刷新。
 
-Passkey/Windows Security 不会在点击项目或 token 校验成功时自动弹出。点击项目只会打开 token 面板；如果本浏览器保存过新版 PRF ticket，token 输入框下面会出现 `Use saved Passkey`，只有用户点这个按钮时才会触发系统授权；授权通过后还会要求输入 owner code。`Remember this device with Passkey` 默认不勾选；用户勾选后需要手动输入左上角可见归属编号。`Continue with token` 仍可点击，但提交时会先校验归属编号；输入不一致或可见编号无法对应封包 owner binding 时，会弹出风险提示并停止解密。输入正确 token 后，只有保持勾选且 owner 验证通过时，页面才会先进入 `Save Passkey` 步骤，并在用户再次点击保存时尝试创建或复用站点级 Passkey。取消或创建失败时才写入 5 次/24 小时的本地降级 ticket。
+Passkey/Windows Security 不会在点击项目或 token 校验成功时自动弹出。点击项目只会打开 token 面板；如果本浏览器保存过新版 PRF ticket，token 输入框下面会出现 `Use saved Passkey`，只有用户点这个按钮时才会触发系统授权；授权通过后还会要求输入 owner code。`Remember this device with Passkey` 默认不勾选；用户勾选后需要手动输入 private token 和左上角可见归属编号。`Continue with token` 仍可点击，但提交时会先校验归属编号和 private token；任一项不一致时，会弹出风险提示或停止设备授权流程。输入正确 access token 后，只有保持勾选、private token 正确且 owner 验证通过时，页面才会先进入 `Save Passkey` 步骤，并在用户再次点击保存时尝试创建或复用站点级 Passkey。取消或创建失败时才写入 5 次/24 小时的本地降级 ticket。
 
-提交 token 后页面会尝试写空剪切板，避免 token 留在系统剪切板里被后续页面误用；无论是否勾选 `Remember this device with Passkey` 都会尝试执行，浏览器拒绝剪切板写入时会静默忽略。如果取消勾选 `Remember this device with Passkey`，token 校验和解密会留在当前弹窗里完成，不会创建 Passkey ticket、不会写入 5 次/24 小时的本地降级 ticket，也不会写入 5 次/24 小时的页面会话缓存；如果这个 record 之前已有旧逻辑留下的会话缓存或 PRF 失败留下的本地降级 ticket，这次一次性解锁成功后也会清掉它。自动本地降级解锁只接受带有明确 Remember 标记的新 ticket，旧的无标记降级 ticket 不会再直接通过。完成后页面切到 `Open record` 步骤，用户再点击一次才打开临时 viewer 标签页。这样可以避免解密前先打开空白标签页导致浏览器把原页面降到后台，从而拖慢 Argon2 Worker。
+提交 access token 后页面会尝试写空剪切板，避免 token 留在系统剪切板里被后续页面误用；无论是否勾选 `Remember this device with Passkey` 都会尝试执行，浏览器拒绝剪切板写入时会静默忽略。如果取消勾选 `Remember this device with Passkey`，access token 校验和解密会留在当前弹窗里完成，不会创建 Passkey ticket、不会写入 5 次/24 小时的本地降级 ticket，也不会写入 5 次/24 小时的页面会话缓存；如果这个 record 之前已有旧逻辑留下的会话缓存或 PRF 失败留下的本地降级 ticket，这次一次性解锁成功后也会清掉它。自动本地降级解锁只接受带有明确 `deviceGrantTicket` 的新版 ticket，旧 ticket 不会再直接通过。完成后页面切到 `Open record` 步骤，用户再点击一次才打开临时 viewer 标签页。这样可以避免解密前先打开空白标签页导致浏览器把原页面降到后台，从而拖慢 Argon2 Worker。
 
 浏览器不能在不调用 WebAuthn 的情况下静默枚举或确认系统里是否仍保存着对应 Passkey。因此如果用户在 Windows 里手动删除了通行凭证，而站点本地 ticket 还在，页面仍可能显示 `Use saved Passkey` 入口；点击后验证会失败，用户需要重新输入 token 来刷新设备授权。
 
@@ -67,7 +67,7 @@ Passkey/Windows Security 不会在点击项目或 token 校验成功时自动弹
 
 ## 这套做法不能解决什么
 
-如果有人已经拿到了 `access token`，那他就可以正常查看内容。看到之后，仍然可以保存页面、复制内容，或者截图留存。
+如果有人已经拿到了 `access token`，那他就可以正常查看内容；但只有同时拿到 `private token`，才可以在自己的浏览器里保存设备授权。设备授权保存成功后，后续使用该设备授权只需要通过本机 Passkey/fallback 保护和 owner code。看到之后，仍然可以保存页面、复制内容，或者截图留存。
 
 所以这套机制更接近“访问控制”，而不是“看过也带不走”的那种保护。
 

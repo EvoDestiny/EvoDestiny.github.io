@@ -12,6 +12,9 @@
     const devicePassTtlMs = 24 * 60 * 60 * 1000;
     const devicePassClockSkewMs = 90 * 1000;
     const devicePassTicketPrefix = 'EVT3';
+    const passkeyOwnerCodeBinding = 'owner-hash-private-token-v1';
+    const localOwnerCodeBinding = 'local-secret-private-token-v1';
+    const privateTokenBinding = 'device-grant-v1';
     const textDecoder = new TextDecoder();
     const textEncoder = new TextEncoder();
 
@@ -66,17 +69,20 @@
     const savedPasskeyDetail = document.getElementById('saved-passkey-detail');
     const ownerVerificationPanel = document.getElementById('owner-verification');
     const tokenField = tokenForm?.querySelector('.token-field') || null;
-    const tokenLabel = tokenForm?.querySelector('.token-label') || null;
+    const tokenLabel = document.getElementById('token-label');
     const tokenNote = tokenForm?.querySelector('.token-note') || null;
     const devicePassInput = document.getElementById('device-pass-input');
     const devicePassOption = document.getElementById('device-pass-option');
-    const devicePassDetail = devicePassOption?.querySelector('.device-pass-detail') || null;
+    const devicePassDetail = document.getElementById('device-pass-detail');
     const deviceIdConfirm = document.getElementById('device-id-confirm');
     const deviceIdInput = document.getElementById('device-id-input');
+    const privateTokenConfirm = document.getElementById('private-token-confirm');
+    const privateTokenInput = document.getElementById('private-token-input');
     const defaultTokenNote = tokenNote ? tokenNote.textContent : '';
 
     const state = {
         activeRecord: null,
+        activeBundlePayload: null,
         bundleCache: new Map(),
         closeTimer: 0,
         devicePassDb: null,
@@ -518,6 +524,45 @@
             : 'legacy:unknown';
     }
 
+    function supportsPrivateDeviceGrant(bundlePayload) {
+        const grant = bundlePayload?.deviceGrant;
+        return Boolean(
+            bundlePayload &&
+            bundlePayload.version >= 6 &&
+            grant &&
+            grant.type === 'private-token-argon2id' &&
+            grant.cipher === 'AES-GCM' &&
+            grant.kdf?.name === 'Argon2id'
+        );
+    }
+
+    function getDeviceGrantSiteContext(bundlePayload, ownerHash = '') {
+        const owner = bundlePayload?.owner || {};
+        const ownerSignature = bundlePayload?.ownerSignature || {};
+
+        return {
+            version: 1,
+            origin: window.location.origin,
+            taskId: bundlePayload?.taskId || '',
+            bundleId: getBundleId(bundlePayload),
+            ownerHash: ownerHash || '',
+            canonicalSite: owner.canonicalSite || '',
+            canonicalRepo: owner.canonicalRepo || '',
+            publicKeyFingerprint: ownerSignature.publicKeyFingerprint || ''
+        };
+    }
+
+    async function getDeviceGrantBinding(bundlePayload, ownerHash = '') {
+        return sha256Base64url(stableStringify(getDeviceGrantSiteContext(bundlePayload, ownerHash)));
+    }
+
+    function createPrivateTokenError(message, cause) {
+        const error = new Error(message);
+        error.privateTokenError = true;
+        error.cause = cause;
+        return error;
+    }
+
     function getSessionVaultKey(record, bundlePayload, ownerHash = '') {
         const cached = state.sessionVaultKeys.get(record.id);
         const now = Date.now();
@@ -544,7 +589,7 @@
     }
 
     function setSessionVaultKey(record, bundlePayload, vaultKey, ownerHash = '') {
-        if (!vaultKey || !bundlePayload || ![3, 4, 5].includes(bundlePayload.version)) {
+        if (!vaultKey || !bundlePayload || ![3, 4, 5, 6].includes(bundlePayload.version)) {
             return;
         }
 
@@ -627,7 +672,8 @@
 
         pending.resolve({
             archiveBytes: new Uint8Array(payload.archiveBytes),
-            vaultKey: payload.vaultKey ? new Uint8Array(payload.vaultKey) : null
+            vaultKey: payload.vaultKey ? new Uint8Array(payload.vaultKey) : null,
+            deviceGrantKey: payload.deviceGrantKey ? new Uint8Array(payload.deviceGrantKey) : null
         });
     }
 
@@ -667,7 +713,7 @@
     }
 
     async function runDecryptWorker(message) {
-        if (!message.bundlePayload || ![2, 3, 4, 5].includes(message.bundlePayload.version)) {
+        if (!message.bundlePayload || ![2, 3, 4, 5, 6].includes(message.bundlePayload.version)) {
             throw new Error('Archive format is outdated and must be resealed.');
         }
 
@@ -711,6 +757,40 @@
             bundlePayload,
             ownerHash
         });
+    }
+
+    async function unwrapDeviceGrantWithPrivateToken(bundlePayload, privateToken, ownerHash = '') {
+        if (!supportsPrivateDeviceGrant(bundlePayload)) {
+            throw createPrivateTokenError('This record must be resealed before device access can be saved.');
+        }
+
+        if (!privateToken) {
+            throw createPrivateTokenError('Enter the private token for device access.');
+        }
+
+        try {
+            const result = await runDecryptWorker({
+                mode: 'deviceGrant',
+                privateToken,
+                bundlePayload,
+                ownerHash
+            });
+
+            if (!result.deviceGrantKey) {
+                throw new Error('Private device authorization is unavailable.');
+            }
+
+            return {
+                deviceGrantKey: result.deviceGrantKey,
+                deviceGrantBinding: await getDeviceGrantBinding(bundlePayload, ownerHash)
+            };
+        } catch (error) {
+            if (error?.privateTokenError) {
+                throw error;
+            }
+
+            throw createPrivateTokenError('Private token could not authorize device access.', error);
+        }
     }
 
     function unpackArchive(archiveBytes) {
@@ -1332,8 +1412,9 @@
         if (!devicePassInput || !devicePassOption) return;
 
         const { resetChoice = true } = options;
-        const isSupportedBundle = !bundlePayload || [3, 4, 5].includes(bundlePayload.version);
-        const isAvailable = canAttemptPersistentDevicePass() && isSupportedBundle;
+        const hasPersistentStorage = canAttemptPersistentDevicePass();
+        const isSupportedBundle = !bundlePayload || supportsPrivateDeviceGrant(bundlePayload);
+        const isAvailable = hasPersistentStorage && isSupportedBundle;
         const hasPasskeyPrfAttempt = canAttemptPasskeyPrf();
         const rpId = getPasskeyRpId();
 
@@ -1346,22 +1427,27 @@
         }
         devicePassOption.classList.toggle('is-disabled', !isAvailable);
         devicePassOption.title = isAvailable
-            ? 'Bind this vault to an encrypted local device ticket after the token unlock succeeds.'
-            : rpId
-                ? 'Persistent device tickets require a secure context, IndexedDB, and Web Crypto.'
-                : 'Persistent Passkey tickets require a domain origin. Use localhost or the GitHub Pages HTTPS domain instead of 127.0.0.1.';
+            ? 'Bind this vault to an encrypted local device ticket after the access and private tokens unlock successfully.'
+            : !isSupportedBundle
+                ? 'This record must be resealed with private device authorization before it can be remembered.'
+                : rpId
+                    ? 'Persistent device tickets require a secure context, IndexedDB, and Web Crypto.'
+                    : 'Persistent Passkey tickets require a domain origin. Use localhost or the GitHub Pages HTTPS domain instead of 127.0.0.1.';
 
         if (devicePassDetail) {
             devicePassDetail.textContent = isAvailable
                 ? hasPasskeyPrfAttempt
-                    ? 'Passkey unlock stays saved on this device; fallback local tickets last 5 uses or 24 hours.'
-                    : 'Local fallback unlock lasts up to 5 times or 24 hours.'
-                : rpId
-                    ? 'This browser will fall back to session-only access if persistent local storage is unavailable.'
-                    : 'Use localhost or the GitHub Pages HTTPS domain; IP origins only get session access.';
+                    ? 'Saving device access requires the private token; saved Passkey unlock later uses the owner code.'
+                    : 'Saving device access requires the private token; local fallback unlock later uses the owner code.'
+                : !isSupportedBundle
+                    ? 'This record must be resealed with private device authorization before it can be remembered.'
+                    : rpId
+                        ? 'This browser will fall back to session-only access if persistent local storage is unavailable.'
+                        : 'Use localhost or the GitHub Pages HTTPS domain; IP origins only get session access.';
         }
 
         updateDeviceIdConfirmation();
+        updatePrivateTokenConfirmation();
         updateTokenSubmitAvailability();
     }
 
@@ -1377,6 +1463,23 @@
 
         if (!shouldShow) {
             deviceIdInput.value = '';
+        }
+    }
+
+    function updatePrivateTokenConfirmation() {
+        if (!privateTokenConfirm || !privateTokenInput || !devicePassInput) return;
+
+        const shouldShow = (
+            isTokenMode() &&
+            !devicePassInput.disabled &&
+            devicePassInput.checked
+        );
+
+        privateTokenConfirm.hidden = !shouldShow;
+        privateTokenInput.required = shouldShow;
+
+        if (!shouldShow) {
+            privateTokenInput.value = '';
         }
     }
 
@@ -1423,13 +1526,21 @@
     function canUseSavedDeviceTicket(ticketRecord) {
         if (!ticketRecord) return false;
         if (ticketRecord.protection === 'passkey-prf') {
-            return ticketRecord.rememberDeviceRequested === true &&
-                ticketRecord.ownerCodeBinding === 'owner-hash-v2';
+            return ticketRecord.version === 3 &&
+                ticketRecord.rememberDeviceRequested === true &&
+                ticketRecord.ownerCodeBinding === passkeyOwnerCodeBinding &&
+                ticketRecord.privateTokenBinding === privateTokenBinding &&
+                Boolean(ticketRecord.deviceGrantBinding) &&
+                Boolean(ticketRecord.deviceGrantTicket);
         }
         return ticketRecord.protection === 'local-crypto-key' &&
+            ticketRecord.version === 3 &&
             ticketRecord.rememberDeviceRequested === true &&
-            ticketRecord.ownerCodeBinding === 'local-secret-v1' &&
-            Boolean(ticketRecord.localSecretTicket);
+            ticketRecord.ownerCodeBinding === localOwnerCodeBinding &&
+            ticketRecord.privateTokenBinding === privateTokenBinding &&
+            Boolean(ticketRecord.deviceGrantBinding) &&
+            Boolean(ticketRecord.localSecretTicket) &&
+            Boolean(ticketRecord.deviceGrantTicket);
     }
 
     function configureSavedPasskeyOption(record = state.activeRecord, mode = 'token') {
@@ -1613,7 +1724,7 @@
 
     function createDeviceTicketGroup(taskId) {
         return {
-            version: 2,
+            version: 3,
             taskId,
             tickets: {},
             updatedAt: 0
@@ -1925,6 +2036,7 @@
             context.taskId,
             context.bundleId,
             context.ownerHash || '',
+            context.deviceGrantBinding || '',
             context.protection || 'passkey-prf',
             getTicketProtectorId(context)
         ].join('|'));
@@ -1936,7 +2048,57 @@
             bundleId: getBundleId(bundlePayload),
             ownerHash,
             keyId: ticketRecord.keyId,
+            deviceGrantBinding: ticketRecord.deviceGrantBinding || '',
             protection: 'local-secret-key'
+        };
+    }
+
+    function getDeviceGrantTicketContext(record, bundlePayload, ticketRecord, ownerHash = '') {
+        return {
+            taskId: record?.id || ticketRecord.taskId,
+            bundleId: getBundleId(bundlePayload),
+            ownerHash,
+            credentialId: ticketRecord.credentialId,
+            keyId: ticketRecord.keyId,
+            deviceGrantBinding: ticketRecord.deviceGrantBinding || '',
+            protection: `${ticketRecord.protection || 'device'}-device-grant`
+        };
+    }
+
+    function getDeviceGrantTicketPayload(record, bundlePayload, ownerHash, deviceGrant, now = Date.now(), createdAt = now) {
+        if (!deviceGrant?.deviceGrantKey || !deviceGrant?.deviceGrantBinding) {
+            throw new Error('Private device authorization is required.');
+        }
+
+        return {
+            version: 1,
+            taskId: record.id,
+            bundleId: getBundleId(bundlePayload),
+            ownerHash: ownerHash || '',
+            deviceGrantBinding: deviceGrant.deviceGrantBinding,
+            deviceGrantKey: bytesToBase64url(deviceGrant.deviceGrantKey),
+            createdAt,
+            updatedAt: now
+        };
+    }
+
+    function readDeviceGrantTicketPayload(payload, ticketRecord, bundlePayload, ownerHash = '') {
+        if (
+            !payload ||
+            payload.version !== 1 ||
+            payload.taskId !== ticketRecord.taskId ||
+            payload.bundleId !== getBundleId(bundlePayload) ||
+            (payload.ownerHash || '') !== (ownerHash || '') ||
+            (payload.deviceGrantBinding || '') !== (ticketRecord.deviceGrantBinding || '') ||
+            !payload.deviceGrantKey
+        ) {
+            throw new Error('Saved device authorization does not match this owner.');
+        }
+
+        return {
+            deviceGrantKey: base64urlToBytes(payload.deviceGrantKey),
+            deviceGrantBinding: payload.deviceGrantBinding,
+            createdAt: payload.createdAt || ticketRecord.createdAt || Date.now()
         };
     }
 
@@ -1963,10 +2125,28 @@
         ].join('.');
     }
 
-    async function deriveTicketKey(prfOutput, { taskId, bundleId, credentialId, ownerHash }) {
+    function combineKeyMaterial(...chunks) {
+        const normalized = chunks.map(chunk => new Uint8Array(chunk || []));
+        const length = normalized.reduce((total, chunk) => total + chunk.byteLength, 0);
+        const combined = new Uint8Array(length);
+        let offset = 0;
+
+        for (const chunk of normalized) {
+            combined.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+
+        return combined;
+    }
+
+    async function deriveTicketKey(prfOutput, { taskId, bundleId, credentialId, ownerHash, deviceGrantBinding }, deviceGrantKey) {
+        if (!deviceGrantKey || !deviceGrantKey.byteLength) {
+            throw new Error('Private device authorization is required.');
+        }
+
         const baseKey = await window.crypto.subtle.importKey(
             'raw',
-            prfOutput,
+            combineKeyMaterial(prfOutput, deviceGrantKey),
             'HKDF',
             false,
             ['deriveKey']
@@ -1981,9 +2161,10 @@
                     taskId,
                     bundleId,
                     ownerHash || '',
-                    'passkey-prf-v2'
+                    deviceGrantBinding || '',
+                    'passkey-prf-v3'
                 ].join('|')),
-                info: textEncoder.encode(`evo-vault-passkey-ticket-key-v2|${credentialId}|${ownerHash || ''}`)
+                info: textEncoder.encode(`evo-vault-passkey-ticket-key-v3|${credentialId}|${ownerHash || ''}|${deviceGrantBinding || ''}`)
             },
             baseKey,
             {
@@ -1995,10 +2176,52 @@
         );
     }
 
-    async function deriveLocalFallbackTicketKey(localSecret, { taskId, bundleId, keyId, ownerHash }, salt) {
+    async function derivePasskeyDeviceGrantTicketKey(prfOutput, { taskId, bundleId, credentialId, ownerHash, deviceGrantBinding }, salt) {
+        if (!prfOutput || !prfOutput.byteLength) {
+            throw new Error('Passkey PRF output is unavailable.');
+        }
+
         const baseKey = await window.crypto.subtle.importKey(
             'raw',
-            localSecret,
+            prfOutput,
+            'HKDF',
+            false,
+            ['deriveKey']
+        );
+
+        return window.crypto.subtle.deriveKey(
+            {
+                name: 'HKDF',
+                hash: 'SHA-256',
+                salt,
+                info: textEncoder.encode([
+                    'evo-vault-passkey-device-grant-ticket-key-v1',
+                    window.location.origin,
+                    taskId,
+                    bundleId,
+                    ownerHash || '',
+                    deviceGrantBinding || '',
+                    credentialId
+                ].join('|'))
+            },
+            baseKey,
+            {
+                name: 'AES-GCM',
+                length: 256
+            },
+            false,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    async function deriveLocalFallbackTicketKey(localSecret, { taskId, bundleId, keyId, ownerHash, deviceGrantBinding }, salt, deviceGrantKey) {
+        if (!deviceGrantKey || !deviceGrantKey.byteLength) {
+            throw new Error('Private device authorization is required.');
+        }
+
+        const baseKey = await window.crypto.subtle.importKey(
+            'raw',
+            combineKeyMaterial(localSecret, deviceGrantKey),
             'HKDF',
             false,
             ['deriveKey']
@@ -2015,6 +2238,7 @@
                     taskId,
                     bundleId,
                     ownerHash || '',
+                    deviceGrantBinding || '',
                     keyId
                 ].join('|'))
             },
@@ -2047,8 +2271,13 @@
         });
     }
 
-    async function encryptDeviceTicketPayload(payload, context, salt, prfOutput) {
-        const key = await deriveTicketKey(prfOutput, context);
+    async function encryptDeviceTicketPayload(payload, context, salt, prfOutput, deviceGrantKey) {
+        const key = await deriveTicketKey(prfOutput, context, deviceGrantKey);
+        return encryptDeviceTicketPayloadWithKey(payload, context, salt, key);
+    }
+
+    async function encryptPasskeyDeviceGrantTicket(payload, context, salt, prfOutput) {
+        const key = await derivePasskeyDeviceGrantTicketKey(prfOutput, context, salt);
         return encryptDeviceTicketPayloadWithKey(payload, context, salt, key);
     }
 
@@ -2059,6 +2288,7 @@
             ownerHash: ticketRecord.ownerHash || '',
             credentialId: ticketRecord.credentialId,
             keyId: ticketRecord.keyId,
+            deviceGrantBinding: ticketRecord.deviceGrantBinding || '',
             protection: ticketRecord.protection || 'passkey-prf',
             ...overrides
         };
@@ -2080,9 +2310,38 @@
         return JSON.parse(textDecoder.decode(plaintext));
     }
 
+    async function decryptPasskeyDeviceGrantTicket(record, bundlePayload, ticketRecord, ownerHash, prfOutput, salt) {
+        if (!ticketRecord.deviceGrantTicket) {
+            throw new Error('Saved Passkey access must be refreshed with the access and private tokens.');
+        }
+
+        const context = getDeviceGrantTicketContext(record, bundlePayload, ticketRecord, ownerHash);
+        const key = await derivePasskeyDeviceGrantTicketKey(prfOutput, context, salt);
+        const payload = await decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key, {
+            ticket: ticketRecord.deviceGrantTicket,
+            context
+        });
+
+        return readDeviceGrantTicketPayload(payload, ticketRecord, bundlePayload, ownerHash);
+    }
+
+    async function decryptLocalDeviceGrantTicket(record, bundlePayload, ticketRecord, key, ownerHash) {
+        if (!ticketRecord.deviceGrantTicket) {
+            throw new Error('Saved local access must be refreshed with the access and private tokens.');
+        }
+
+        const context = getDeviceGrantTicketContext(record, bundlePayload, ticketRecord, ownerHash);
+        const payload = await decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key, {
+            ticket: ticketRecord.deviceGrantTicket,
+            context
+        });
+
+        return readDeviceGrantTicketPayload(payload, ticketRecord, bundlePayload, ownerHash);
+    }
+
     async function decryptLocalFallbackSecret(record, bundlePayload, ticketRecord, key, ownerHash = '') {
-        if (ticketRecord.ownerCodeBinding !== 'local-secret-v1' || !ticketRecord.localSecretTicket) {
-            throw new Error('Saved local access must be refreshed with the token.');
+        if (ticketRecord.ownerCodeBinding !== localOwnerCodeBinding || ticketRecord.privateTokenBinding !== privateTokenBinding || !ticketRecord.localSecretTicket) {
+            throw new Error('Saved local access must be refreshed with the access and private tokens.');
         }
 
         const secretPayload = await decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key, {
@@ -2092,10 +2351,11 @@
 
         if (
             !secretPayload ||
-            secretPayload.version !== 1 ||
+            secretPayload.version !== 2 ||
             secretPayload.taskId !== ticketRecord.taskId ||
             secretPayload.bundleId !== getBundleId(bundlePayload) ||
             (secretPayload.ownerHash || '') !== (ownerHash || '') ||
+            (secretPayload.deviceGrantBinding || '') !== (ticketRecord.deviceGrantBinding || '') ||
             !secretPayload.localSecret
         ) {
             throw new Error('Saved local access does not match this owner.');
@@ -2104,15 +2364,16 @@
         return base64urlToBytes(secretPayload.localSecret);
     }
 
-    async function decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfOutput, ownerHash = ticketRecord.ownerHash || '') {
+    async function decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfOutput, ownerHash = ticketRecord.ownerHash || '', deviceGrantKey, deviceGrantBinding = ticketRecord.deviceGrantBinding || '') {
         const context = {
             taskId: ticketRecord.taskId,
             bundleId: getBundleId(bundlePayload),
             ownerHash,
             credentialId: ticketRecord.credentialId,
+            deviceGrantBinding,
             protection: ticketRecord.protection || 'passkey-prf'
         };
-        const key = await deriveTicketKey(prfOutput, context);
+        const key = await deriveTicketKey(prfOutput, context, deviceGrantKey);
 
         return decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, key);
     }
@@ -2311,18 +2572,18 @@
         };
     }
 
-    async function createDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '') {
-        if (!canAttemptPersistentDevicePass() || !vaultKey || !bundlePayload || ![3, 4, 5].includes(bundlePayload.version)) {
+    async function createDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '', deviceGrant) {
+        if (!canAttemptPersistentDevicePass() || !vaultKey || !bundlePayload || !supportsPrivateDeviceGrant(bundlePayload)) {
             throw new Error('Persistent device tickets are unavailable in this browser.');
         }
 
-        if (bundlePayload.version >= 4 && !ownerHash) {
-            throw new Error('Persistent device tickets require owner verification.');
+        if (!ownerHash || !deviceGrant?.deviceGrantKey || !deviceGrant?.deviceGrantBinding) {
+            throw new Error('Persistent device tickets require owner and private token verification.');
         }
 
         if (canAttemptPasskeyPrf()) {
             if (await isPasskeyPrfExplicitlyUnavailable()) {
-                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash);
+                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash, deviceGrant);
                 return {
                     ...fallbackResult,
                     prfAttempted: false,
@@ -2332,11 +2593,11 @@
             }
 
             try {
-                return await createPasskeyDeviceTicket(record, bundlePayload, vaultKey, ownerHash);
+                return await createPasskeyDeviceTicket(record, bundlePayload, vaultKey, ownerHash, deviceGrant);
             } catch (error) {
                 const prfFailureReason = getErrorMessage(error);
                 console.warn('Passkey PRF ticket failed; falling back to local CryptoKey ticket:', error);
-                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash);
+                const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash, deviceGrant);
 
                 return {
                     ...fallbackResult,
@@ -2347,7 +2608,7 @@
             }
         }
 
-        const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash);
+        const fallbackResult = await createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash, deviceGrant);
 
         return {
             ...fallbackResult,
@@ -2357,42 +2618,62 @@
         };
     }
 
-    async function createPasskeyDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '') {
+    async function createPasskeyDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '', deviceGrant) {
         const salt = getRandomBytes(32);
         const { credentialId, prfOutput, reusedCredential } = await getOrCreatePasskeyPrfForTicket(salt);
         const now = Date.now();
         const bundleId = getBundleId(bundlePayload);
+        const deviceGrantBinding = deviceGrant.deviceGrantBinding;
         const context = {
             taskId: record.id,
             bundleId,
             ownerHash,
             credentialId,
+            deviceGrantBinding,
             protection: 'passkey-prf'
         };
+        const deviceGrantTicketRecord = {
+            taskId: record.id,
+            protection: 'passkey-prf',
+            ownerHash,
+            credentialId,
+            deviceGrantBinding
+        };
+        const deviceGrantTicketContext = getDeviceGrantTicketContext(record, bundlePayload, deviceGrantTicketRecord, ownerHash);
+        const deviceGrantTicket = await encryptPasskeyDeviceGrantTicket(
+            getDeviceGrantTicketPayload(record, bundlePayload, ownerHash, deviceGrant, now),
+            deviceGrantTicketContext,
+            salt,
+            prfOutput
+        );
         const payload = {
-            version: 1,
+            version: 2,
             taskId: record.id,
             bundleId,
             ownerHash,
+            deviceGrantBinding,
             vaultKey: bytesToBase64url(vaultKey),
             authorization: 'permanent',
             createdAt: now,
             lastUsedAt: now,
             counter: 0
         };
-        const ticket = await encryptDeviceTicketPayload(payload, context, salt, prfOutput);
+        const ticket = await encryptDeviceTicketPayload(payload, context, salt, prfOutput, deviceGrant.deviceGrantKey);
 
         await saveDeviceTicket({
-            version: 1,
+            version: 3,
             protection: 'passkey-prf',
-            ownerCodeBinding: 'owner-hash-v2',
+            ownerCodeBinding: passkeyOwnerCodeBinding,
+            privateTokenBinding,
             authorization: 'permanent',
             rememberDeviceRequested: true,
             credentialScope: 'origin',
             taskId: record.id,
             bundleId,
             ownerHash,
+            deviceGrantBinding,
             credentialId,
+            deviceGrantTicket,
             ticket,
             createdAt: now,
             updatedAt: now
@@ -2407,7 +2688,7 @@
         };
     }
 
-    async function createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '') {
+    async function createLocalCryptoDeviceTicket(record, bundlePayload, vaultKey, ownerHash = '', deviceGrant) {
         const now = Date.now();
         const bundleId = getBundleId(bundlePayload);
         const keyId = `local:${record.id}:${bundleId}`;
@@ -2415,32 +2696,49 @@
         const localSecret = getRandomBytes(32);
         const localSecretSalt = getRandomBytes(16);
         const ticketSalt = getRandomBytes(32);
+        const deviceGrantBinding = deviceGrant.deviceGrantBinding;
         const context = {
             taskId: record.id,
             bundleId,
             ownerHash,
             keyId,
+            deviceGrantBinding,
             protection: 'local-crypto-key'
+        };
+        const deviceGrantTicketRecord = {
+            taskId: record.id,
+            protection: 'local-crypto-key',
+            ownerHash,
+            keyId,
+            deviceGrantBinding
         };
         const localSecretTicket = await encryptDeviceTicketPayloadWithKey(
             {
-                version: 1,
+                version: 2,
                 taskId: record.id,
                 bundleId,
                 ownerHash,
+                deviceGrantBinding,
                 localSecret: bytesToBase64url(localSecret),
                 createdAt: now
             },
-            getLocalSecretContext(record, bundlePayload, { taskId: record.id, keyId }, ownerHash),
+            getLocalSecretContext(record, bundlePayload, { taskId: record.id, keyId, deviceGrantBinding }, ownerHash),
             localSecretSalt,
             key
         );
-        const ticketKey = await deriveLocalFallbackTicketKey(localSecret, context, ticketSalt);
+        const deviceGrantTicket = await encryptDeviceTicketPayloadWithKey(
+            getDeviceGrantTicketPayload(record, bundlePayload, ownerHash, deviceGrant, now),
+            getDeviceGrantTicketContext(record, bundlePayload, deviceGrantTicketRecord, ownerHash),
+            getRandomBytes(32),
+            key
+        );
+        const ticketKey = await deriveLocalFallbackTicketKey(localSecret, context, ticketSalt, deviceGrant.deviceGrantKey);
         const payload = {
-            version: 1,
+            version: 2,
             taskId: record.id,
             bundleId,
             ownerHash,
+            deviceGrantBinding,
             vaultKey: bytesToBase64url(vaultKey),
             usesRemaining: devicePassMaxUses,
             maxUses: devicePassMaxUses,
@@ -2452,15 +2750,18 @@
         const ticket = await encryptDeviceTicketPayloadWithKey(payload, context, ticketSalt, ticketKey);
 
         await saveDeviceTicket({
-            version: 1,
+            version: 3,
             protection: 'local-crypto-key',
-            ownerCodeBinding: 'local-secret-v1',
+            ownerCodeBinding: localOwnerCodeBinding,
+            privateTokenBinding,
             rememberDeviceRequested: true,
             taskId: record.id,
             bundleId,
             ownerHash,
+            deviceGrantBinding,
             keyId,
             localSecretTicket,
+            deviceGrantTicket,
             ticket,
             createdAt: now,
             updatedAt: now
@@ -2474,15 +2775,24 @@
         };
     }
 
-    function validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash = '') {
+    function validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash = '', deviceGrantBinding = '') {
         const now = Date.now();
 
-        if (!payload || payload.version !== 1 || payload.taskId !== ticketRecord.taskId || payload.bundleId !== getBundleId(bundlePayload)) {
+        if (!payload || payload.version !== 2 || payload.taskId !== ticketRecord.taskId || payload.bundleId !== getBundleId(bundlePayload)) {
             throw new Error('Device ticket does not match this archive.');
         }
 
         if ((payload.ownerHash || '') !== (ownerHash || '') || (ticketRecord.ownerHash || '') !== (ownerHash || '')) {
             throw new Error('Device ticket does not match this owner.');
+        }
+
+        if (
+            ticketRecord.privateTokenBinding !== privateTokenBinding ||
+            !deviceGrantBinding ||
+            (payload.deviceGrantBinding || '') !== deviceGrantBinding ||
+            (ticketRecord.deviceGrantBinding || '') !== deviceGrantBinding
+        ) {
+            throw new Error('Device ticket requires the matching saved device authorization.');
         }
 
         if (!payload.vaultKey) {
@@ -2514,12 +2824,20 @@
     }
 
     async function unlockWithDeviceTicket(record, bundlePayload, ticketRecord, ownerHash = '') {
-        if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload) || ![3, 4, 5].includes(bundlePayload.version)) {
+        if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload) || !supportsPrivateDeviceGrant(bundlePayload)) {
             throw new Error('Device ticket is stale.');
         }
 
-        if (ticketRecord.protection === 'passkey-prf' && ticketRecord.ownerCodeBinding !== 'owner-hash-v2') {
-            throw new Error('Saved Passkey access must be refreshed with the token.');
+        if (ticketRecord.privateTokenBinding !== privateTokenBinding) {
+            throw new Error('Saved device access must be refreshed with the access and private tokens.');
+        }
+
+        if (!ticketRecord.deviceGrantTicket || !ticketRecord.deviceGrantBinding) {
+            throw new Error('Saved device access must be refreshed with the access and private tokens.');
+        }
+
+        if (ticketRecord.protection === 'passkey-prf' && ticketRecord.ownerCodeBinding !== passkeyOwnerCodeBinding) {
+            throw new Error('Saved Passkey access must be refreshed with the access and private tokens.');
         }
 
         if (ticketRecord.protection !== 'local-crypto-key' && (ticketRecord.ownerHash || '') !== (ownerHash || '')) {
@@ -2542,21 +2860,28 @@
             throw new Error('This Passkey does not expose PRF output.');
         }
 
-        if (ticketRecord.ownerCodeBinding !== 'owner-hash-v2') {
-            throw new Error('Saved Passkey access must be refreshed with the token.');
+        if (ticketRecord.ownerCodeBinding !== passkeyOwnerCodeBinding || ticketRecord.privateTokenBinding !== privateTokenBinding) {
+            throw new Error('Saved Passkey access must be refreshed with the access and private tokens.');
         }
 
         const currentTicket = parseDeviceTicket(ticketRecord.ticket);
+        let deviceGrant;
+        let deviceGrantBinding = '';
         let payload;
         try {
-            payload = await decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfResults.first, ownerHash);
-            validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash);
+            deviceGrant = await decryptPasskeyDeviceGrantTicket(record, bundlePayload, ticketRecord, ownerHash, prfResults.first, currentTicket.salt);
+            deviceGrantBinding = deviceGrant.deviceGrantBinding || '';
+            payload = await decryptDeviceTicketPayload(ticketRecord, bundlePayload, prfResults.first, ownerHash, deviceGrant.deviceGrantKey, deviceGrantBinding);
+            validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash, deviceGrantBinding);
         } catch (error) {
             throw createDeviceTicketMismatchError('Saved Passkey ticket no longer matches this archive.', error);
         }
 
         const now = Date.now();
         const vaultKey = base64urlToBytes(payload.vaultKey);
+        const nextTicketSalt = prfResults.second && nextSalt ? nextSalt : currentTicket.salt;
+        const nextPrfOutput = prfResults.second || prfResults.first;
+        const nextDeviceGrantContext = getDeviceGrantTicketContext(record, bundlePayload, ticketRecord, ownerHash);
         const nextPayload = {
             ...payload,
             authorization: 'permanent',
@@ -2573,10 +2898,18 @@
                     bundleId: getBundleId(bundlePayload),
                     ownerHash,
                     credentialId: ticketRecord.credentialId,
+                    deviceGrantBinding,
                     protection: 'passkey-prf'
                 },
-                prfResults.second && nextSalt ? nextSalt : currentTicket.salt,
-                prfResults.second || prfResults.first
+                nextTicketSalt,
+                nextPrfOutput,
+                deviceGrant.deviceGrantKey
+            ),
+            deviceGrantTicket: await encryptPasskeyDeviceGrantTicket(
+                getDeviceGrantTicketPayload(record, bundlePayload, ownerHash, deviceGrant, now, deviceGrant.createdAt),
+                nextDeviceGrantContext,
+                nextTicketSalt,
+                nextPrfOutput
             ),
             updatedAt: now
         };
@@ -2593,22 +2926,26 @@
         }
 
         const currentTicket = parseDeviceTicket(ticketRecord.ticket);
+        const deviceGrant = await decryptLocalDeviceGrantTicket(record, bundlePayload, ticketRecord, key, ownerHash);
         const localSecret = await decryptLocalFallbackSecret(record, bundlePayload, ticketRecord, key, ownerHash);
+        const deviceGrantBinding = deviceGrant.deviceGrantBinding || '';
         const ticketKey = await deriveLocalFallbackTicketKey(
             localSecret,
             {
                 taskId: record.id,
                 bundleId: getBundleId(bundlePayload),
                 ownerHash,
+                deviceGrantBinding,
                 keyId: ticketRecord.keyId
             },
-            currentTicket.salt
+            currentTicket.salt,
+            deviceGrant.deviceGrantKey
         );
         const payload = await decryptDeviceTicketPayloadWithKey(ticketRecord, bundlePayload, ticketKey, {
-            context: getDeviceTicketContext(ticketRecord, bundlePayload, { ownerHash })
+            context: getDeviceTicketContext(ticketRecord, bundlePayload, { ownerHash, deviceGrantBinding })
         });
 
-        validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash);
+        validateDeviceTicketPayload(payload, ticketRecord, bundlePayload, ownerHash, deviceGrantBinding);
 
         const now = Date.now();
         const vaultKey = base64urlToBytes(payload.vaultKey);
@@ -2628,9 +2965,11 @@
                     taskId: record.id,
                     bundleId: getBundleId(bundlePayload),
                     ownerHash,
+                    deviceGrantBinding,
                     keyId: ticketRecord.keyId
                 },
-                nextSalt
+                nextSalt,
+                deviceGrant.deviceGrantKey
             );
             const nextRecord = {
                 ...ticketRecord,
@@ -2641,6 +2980,7 @@
                         bundleId: getBundleId(bundlePayload),
                         ownerHash,
                         keyId: ticketRecord.keyId,
+                        deviceGrantBinding,
                         protection: 'local-crypto-key'
                     },
                     nextSalt,
@@ -2668,6 +3008,19 @@
         }
     }
 
+    function getPrivateTokenValue() {
+        return privateTokenInput ? privateTokenInput.value.trim() : '';
+    }
+
+    function requirePrivateTokenValue(message = 'Enter the private token for device access.') {
+        const privateToken = getPrivateTokenValue();
+        if (!privateToken) {
+            throw createPrivateTokenError(message);
+        }
+
+        return privateToken;
+    }
+
     function setUnlockBusy(isBusy) {
         state.unlocking = isBusy;
 
@@ -2676,7 +3029,12 @@
         if (tokenCancel) tokenCancel.disabled = isBusy;
         if (tokenClose) tokenClose.disabled = isBusy;
         if (savedPasskeyButton) savedPasskeyButton.disabled = isBusy;
-        if (devicePassInput) devicePassInput.disabled = isBusy || !canAttemptPersistentDevicePass();
+        if (devicePassInput) {
+            const activeBundlePayload = state.pendingUnlock?.bundlePayload || state.pendingPasskeyAccess?.bundlePayload || state.activeBundlePayload;
+            const canUseDevicePass = canAttemptPersistentDevicePass() && (!activeBundlePayload || supportsPrivateDeviceGrant(activeBundlePayload));
+            devicePassInput.disabled = isBusy || !canUseDevicePass;
+        }
+        if (privateTokenInput) privateTokenInput.disabled = isBusy;
         updateTokenSubmitAvailability();
     }
 
@@ -2712,7 +3070,7 @@
                 tokenInput.type = 'password';
                 tokenInput.inputMode = 'text';
                 tokenInput.autocomplete = 'one-time-code';
-                tokenInput.placeholder = 'Enter your token';
+                tokenInput.placeholder = 'Access token';
             }
         }
 
@@ -2732,9 +3090,9 @@
                 : isPasskeyOwnerCodeMode
                     ? 'Passkey accepted. Enter the top-left owner code to finish decrypting this saved device ticket.'
                 : isFallbackOwnerCodeMode
-                    ? 'Enter the top-left owner code. It is used with this browser key to unlock the saved local fallback ticket.'
+                    ? 'Enter the top-left owner code. This browser key unlocks the saved local fallback ticket.'
                 : record
-                    ? `Use the access token for ${record.label}. A successful unlock can create an encrypted local device ticket.`
+                    ? `Use the access token for ${record.label}. Saving device access also requires the private token.`
                     : 'Use the access token for this record. The archive is decrypted locally in your browser and opened in a new tab.';
         }
 
@@ -2756,15 +3114,16 @@
                 : isSaveDeviceMode
                     ? 'This happens after the token has been verified, so a failed Passkey attempt will not block opening the record.'
                 : isPasskeyOwnerCodeMode
-                    ? 'The owner code is part of the saved Passkey ticket key and the final archive decryption key.'
+                    ? 'The saved Passkey ticket was enrolled with the private token; unlock now uses this device and owner code.'
                 : isFallbackOwnerCodeMode
-                    ? 'The local fallback ticket is limited to 5 uses or 24 hours. The owner code is part of the ticket decryption key.'
+                    ? 'The local fallback ticket was enrolled with the private token and is limited to 5 uses or 24 hours.'
                 : defaultTokenNote;
         }
 
         const ownerVerification = state.pendingUnlock?.ownerVerification || state.pendingSavedAccess?.ownerVerification || null;
         renderOwnerVerification(isOpenRecordMode ? ownerVerification : null);
         updateDeviceIdConfirmation();
+        updatePrivateTokenConfirmation();
         updateTokenSubmitAvailability();
     }
 
@@ -2894,7 +3253,8 @@
                 pendingUnlock.record,
                 pendingUnlock.bundlePayload,
                 pendingUnlock.vaultKey,
-                pendingUnlock.ownerHash || ''
+                pendingUnlock.ownerHash || '',
+                pendingUnlock.deviceGrant
             );
 
             finishDeviceTicketSave(pendingUnlock, ticketResult);
@@ -2938,6 +3298,7 @@
 
         try {
             const bundlePayload = await fetchBundlePayload(record);
+            state.activeBundlePayload = bundlePayload;
             const ticketRecord = getSavedPasskeyTicket(record);
 
             if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload)) {
@@ -2963,6 +3324,9 @@
 
             if (tokenInput) {
                 tokenInput.value = '';
+            }
+            if (privateTokenInput) {
+                privateTokenInput.value = '';
             }
             setTokenPromptMode('passkeyOwnerCode', record);
             setTokenStatus('Passkey accepted. Type the visible owner code to continue.', 'success');
@@ -3058,8 +3422,8 @@
             console.warn('Saved Passkey owner code unlock failed:', error);
             setTokenStatus(
                 error instanceof Error
-                    ? `${error.message} Recheck the owner code or enter the token again.`
-                    : 'Saved Passkey access failed. Recheck the owner code or enter the token again.',
+                    ? `${error.message} Recheck the owner code or enter the access token again.`
+                    : 'Saved Passkey access failed. Recheck the owner code or enter the access token again.',
                 'error'
             );
             tokenInput.focus({ preventScroll: true });
@@ -3087,6 +3451,7 @@
 
         try {
             bundlePayload = await fetchBundlePayload(record);
+            state.activeBundlePayload = bundlePayload;
         } catch (error) {
             setTokenStatus(error instanceof Error ? error.message : 'Archive bundle is unavailable.', 'error');
             tokenInput.focus({ preventScroll: true });
@@ -3129,8 +3494,8 @@
             console.warn('Saved local access failed:', error);
             setTokenStatus(
                 error instanceof Error
-                    ? `${error.message} Recheck the owner code or enter the token again.`
-                    : 'Saved local access failed. Recheck the owner code or enter the token again.',
+                    ? `${error.message} Recheck the owner code or enter the access token again.`
+                    : 'Saved local access failed. Recheck the owner code or enter the access token again.',
                 'error'
             );
             tokenInput.focus({ preventScroll: true });
@@ -3240,9 +3605,10 @@
 
     function handleDevicePassToggle() {
         updateDeviceIdConfirmation();
+        updatePrivateTokenConfirmation();
         updateTokenSubmitAvailability();
         if (devicePassInput?.checked) {
-            window.setTimeout(() => deviceIdInput?.focus({ preventScroll: true }), 0);
+            window.setTimeout(() => tokenInput?.focus({ preventScroll: true }), 0);
         }
     }
 
@@ -3303,10 +3669,12 @@
             state.pendingSavedAccess = null;
             state.pendingPasskeyAccess = null;
             state.pendingFallbackAccess = null;
+            state.activeBundlePayload = null;
             setTokenPromptMode('token', state.activeRecord);
             state.activeRecord = null;
             setTokenStatus('');
             if (tokenForm) tokenForm.reset();
+            if (privateTokenInput) privateTokenInput.value = '';
             if (restorePanelFocus && panel && !overlay.hidden) {
                 panel.focus({ preventScroll: true });
             }
@@ -3330,6 +3698,7 @@
         state.pendingSavedAccess = null;
         state.pendingPasskeyAccess = null;
         state.pendingFallbackAccess = null;
+        state.activeBundlePayload = null;
         state.activeRecord = record;
         if (tokenMeta) {
             tokenMeta.textContent = `${record.label} · ${record.id.toUpperCase()}`;
@@ -3337,6 +3706,7 @@
         setTokenStatus('');
         if (tokenForm) tokenForm.reset();
         if (deviceIdInput) deviceIdInput.value = '';
+        if (privateTokenInput) privateTokenInput.value = '';
         renderOwnerVerification(null);
         setTokenPromptMode('token', record);
         setUnlockBusy(false);
@@ -3372,6 +3742,7 @@
         state.pendingSavedAccess = null;
         state.pendingPasskeyAccess = null;
         state.pendingFallbackAccess = { record };
+        state.activeBundlePayload = null;
         state.activeRecord = record;
         if (tokenMeta) {
             tokenMeta.textContent = `${record.label} · ${record.id.toUpperCase()}`;
@@ -3380,6 +3751,7 @@
         if (tokenForm) tokenForm.reset();
         if (tokenInput) tokenInput.value = '';
         if (deviceIdInput) deviceIdInput.value = '';
+        if (privateTokenInput) privateTokenInput.value = '';
         renderOwnerVerification(null);
         setTokenPromptMode('fallbackOwnerCode', record);
         setUnlockBusy(false);
@@ -3639,19 +4011,7 @@
         const hasMatchingTicket = canUseSavedDeviceTicket(ticketRecord);
 
         if (hasMatchingTicket) {
-            let vaultKey;
-            try {
-                vaultKey = await unlockWithDeviceTicket(record, bundlePayload, ticketRecord, ownerHash || '');
-            } catch (error) {
-                if (!(error && error.name === 'NotAllowedError')) {
-                    await deleteDeviceTicket(record.id, 'local-crypto-key');
-                }
-
-                throw error;
-            }
-
-            await openViewerFromVaultKey(record, bundlePayload, vaultKey, viewerWindow, { ownerHash });
-            return;
+            throw new Error('Saved local access requires the owner code.');
         }
 
         throw new Error('No saved device access is available.');
@@ -3669,7 +4029,7 @@
 
         if (!hasSessionAccess && hasPasskeyAccess) {
             openTokenPrompt(record.id);
-            setTokenStatus('Saved Passkey unlock is available below the token field.', 'success');
+            setTokenStatus('Saved Passkey unlock is available below the token field. It requires the owner code.', 'success');
             return;
         }
 
@@ -3700,7 +4060,7 @@
                 openTokenPrompt(record.id);
                 setTokenStatus(
                     error instanceof Error
-                        ? `${error.message} Saved Passkey unlock is available below the token field.`
+                        ? `${error.message} Saved Passkey unlock is available below the token field and requires the owner code.`
                         : 'Saved Passkey access requires confirmation.',
                     'error'
                 );
@@ -3730,12 +4090,15 @@
 
         try {
             const bundlePayload = await fetchBundlePayload(state.activeRecord);
+            state.activeBundlePayload = bundlePayload;
             configureDevicePassOption(bundlePayload, { resetChoice: false });
             const shouldRememberDevice = Boolean(
                 devicePassInput &&
                 !devicePassInput.disabled &&
                 devicePassInput.checked
             );
+            let ownerHash = null;
+            let deviceGrant = null;
 
             if (shouldRememberDevice) {
                 const ownerCodeCheck = await verifyRememberOwnerCode(bundlePayload);
@@ -3745,10 +4108,15 @@
                     deviceIdInput?.select();
                     return;
                 }
+
+                const privateToken = requirePrivateTokenValue('Enter the private token to save device access.');
+                ownerHash = ownerCodeCheck.ownerHash || await getClaimedOwnerHash(bundlePayload, ownerCodeCheck.typedCode);
+                setTokenStatus('Checking private token...', 'success');
+                deviceGrant = await unwrapDeviceGrantWithPrivateToken(bundlePayload, privateToken, ownerHash || '');
             }
 
             setTokenStatus('Decrypting archive...', 'success');
-            const ownerHash = await getClaimedOwnerHash(bundlePayload);
+            ownerHash = ownerHash || await getClaimedOwnerHash(bundlePayload);
             const unlockResult = await decryptBundleWithToken(bundlePayload, token, ownerHash);
             const fileMap = unpackArchive(unlockResult.archiveBytes);
             const ownerVerification = await verifyBundleOwner(state.activeRecord, bundlePayload, fileMap, ownerHash);
@@ -3757,6 +4125,9 @@
             if (tokenInput) {
                 tokenInput.value = '';
             }
+            if (privateTokenInput && shouldRememberDevice) {
+                privateTokenInput.value = '';
+            }
 
             if (shouldRememberDevice && unlockResult.vaultKey && canAttemptPersistentDevicePass() && ownerVerification.ownerVerified) {
                 showDeviceSavePrompt({
@@ -3764,6 +4135,7 @@
                     bundlePayload,
                     vaultKey: unlockResult.vaultKey,
                     ownerHash,
+                    deviceGrant,
                     ownerVerification,
                     viewerUrl,
                     viewerWindow: null
@@ -3787,8 +4159,13 @@
             }, ownerVerification.ownerVerified ? 'Token accepted. Click Open record to continue.' : 'Token accepted, but owner verification needs attention.');
         } catch (error) {
             setTokenStatus(error instanceof Error ? error.message : 'Unable to unlock this record.', 'error');
-            tokenInput.focus({ preventScroll: true });
-            tokenInput.select();
+            if (error?.privateTokenError) {
+                privateTokenInput?.focus({ preventScroll: true });
+                privateTokenInput?.select();
+            } else {
+                tokenInput.focus({ preventScroll: true });
+                tokenInput.select();
+            }
         } finally {
             setUnlockBusy(false);
         }

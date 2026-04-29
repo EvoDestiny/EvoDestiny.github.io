@@ -1,7 +1,7 @@
 {
-  "version": 5,
+  "version": 6,
   "taskId": "task-01",
-  "bundleId": "H7wkTEVtNkT4Mcy8MgeXXg",
+  "bundleId": "F9-0q7FiAnJL04inALRW4w",
   "owner": {
     "version": 2,
     "ownerCode": "25051030319",
@@ -9,37 +9,62 @@
     "canonicalRepo": "https://github.com/EvoDestiny/EvoDestiny.github.io",
     "taskId": "task-01",
     "label": "Task 01",
-    "bundleId": "H7wkTEVtNkT4Mcy8MgeXXg",
-    "createdAt": "2026-04-28T11:39:02.645Z"
+    "bundleId": "F9-0q7FiAnJL04inALRW4w",
+    "createdAt": "2026-04-29T04:53:36.290Z"
   },
-  "ownerHash": "sOntPOTPqzLOI_D67PkuLMzwG_1o4TdUHk5R1_kq4TY",
+  "ownerHash": "hRa0BqmKnyxPoAmqU3a3I5xVIm85CGZ9HoiKDuUQ4GQ",
   "ownerSignature": {
     "algorithm": "Ed25519",
     "canonicalization": "stable-json-v1",
     "publicKeySpki": "MCowBQYDK2VwAyEAhaxi0Gb2X6Rt7RJZEqQ6wObKR65aV92APgmTMghmqos=",
     "publicKeyFingerprint": "sha256-nokJLMj2uLM-PMQ2RRKi3dbArdjm7Ex8AfdTsHA9Aiw",
-    "signature": "4Ncl3V7aw0pObgXf6TCI2C16IOweqN8-nWGodryp8xnM0rurWK-XR_ST9RlTwNB3CrEPg9kJLbvU7naTPUdNAw"
+    "signature": "fcX-K7-8GxhYxW4QOBwPn4EyDqQV1DHjTAS9h4-TNYaQgJ8xyU4IdUwl5c45UvhdLhNsma1zyO_tAYfR-8SPBQ"
   },
   "bundle": {
     "archive": "zip",
     "cipher": "AES-GCM",
     "keyDerivation": {
       "name": "HKDF-SHA-256",
-      "salt": "7QhjSl60ETjyUQE3lhuSsG/+DWMkPTEUhu5e/ftXLMY="
+      "salt": "T465wX/MJ9VzCxozZC5UX21U7/dH5Hd24QxxHrVzAwE="
     },
-    "iv": "hiZOlIVgXGanXWFm",
-    "ciphertext": "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"
+    "iv": "oECHLjji3Q4w8BbI",
+    "ciphertext": "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"
+  },
+  "deviceGrant": {
+    "version": 1,
+    "id": "device-grant-primary",
+    "type": "private-token-argon2id",
+    "cipher": "AES-GCM",
+    "context": {
+      "version": 1,
+      "taskId": "task-01",
+      "bundleId": "F9-0q7FiAnJL04inALRW4w",
+      "ownerHash": "hRa0BqmKnyxPoAmqU3a3I5xVIm85CGZ9HoiKDuUQ4GQ",
+      "canonicalSite": "https://evodestiny.github.io",
+      "canonicalRepo": "https://github.com/EvoDestiny/EvoDestiny.github.io",
+      "publicKeyFingerprint": "sha256-nokJLMj2uLM-PMQ2RRKi3dbArdjm7Ex8AfdTsHA9Aiw"
+    },
+    "iv": "7mIzRGahOxdA2sPp",
+    "wrappedDeviceGrantKey": "pm408MIlSBiAf7uIsJ9ZB2t7oOnHrWRJd7hN/ZgqTmZG0sgOZ48FUAyndEBC8tDZ",
+    "kdf": {
+      "name": "Argon2id",
+      "salt": "UgTM0kmJC+hicR+rnHIrBA==",
+      "memoryKiB": 32768,
+      "passes": 2,
+      "parallelism": 1,
+      "tagLength": 32
+    }
   },
   "slots": [
     {
       "id": "token-primary",
       "type": "token-argon2id",
       "cipher": "AES-GCM",
-      "iv": "ZKkb+c+PQK5W+vMI",
-      "wrappedVaultKey": "6uuNwfvbDpQlbGDoHjioCNWRYPAS9YAP+UUajUhESMPU5m2EinJGeNZBBBl7dz5K",
+      "iv": "d8Bpl5eSpQI6oHXH",
+      "wrappedVaultKey": "RVDjLu7NHRVJKJxcuCSbrQeF9jfsKl+tc38HSQ6OO9UkMHsKPlSz4CprRHuxthu4",
       "kdf": {
         "name": "Argon2id",
-        "salt": "J4/hQXOdDa3NzmZADTI+vQ==",
+        "salt": "WV/f/NdQxIPhLaPSK78Uqw==",
         "memoryKiB": 32768,
         "passes": 2,
         "parallelism": 1,

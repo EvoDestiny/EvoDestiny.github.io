@@ -969,6 +969,68 @@ body.modal-open .owner-code {
     line-height: 1.5;
 }
 
+.private-token-confirm {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.private-token-confirm[hidden] {
+    display: none;
+}
+
+.private-token-label {
+    color: var(--card-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    line-height: 1.5;
+}
+
+.private-token-field {
+    border-radius: 0.75rem;
+    border: 1px solid var(--card-border);
+    background: #fff;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.private-token-field:focus-within {
+    border-color: var(--card-focus);
+    box-shadow: 0 0 0 3px var(--card-focus-shadow);
+    background: #fff;
+}
+
+.private-token-input {
+    width: 100%;
+    border: 0;
+    border-radius: 0.75rem;
+    padding: 0.95rem 1rem;
+    background: transparent;
+    color: var(--card-text);
+    font: inherit;
+    font-size: 1rem;
+    letter-spacing: 0.01em;
+    outline: 0;
+}
+
+.private-token-input:focus-visible {
+    outline: none;
+}
+
+.private-token-input::placeholder {
+    color: var(--card-placeholder);
+}
+
+.private-token-detail {
+    margin: 0.1rem 0 0;
+    color: var(--card-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
 .token-actions {
     display: flex;
     justify-content: center;
@@ -1034,7 +1096,8 @@ body.modal-open .owner-code {
 
 .token-submit:disabled,
 .token-cancel:disabled,
-.token-input:disabled {
+.token-input:disabled,
+.private-token-input:disabled {
     cursor: wait;
     opacity: 0.7;
 }
