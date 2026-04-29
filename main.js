@@ -15,6 +15,7 @@
     const passkeyOwnerCodeBinding = 'owner-hash-private-token-v1';
     const localOwnerCodeBinding = 'local-secret-private-token-v1';
     const privateTokenBinding = 'device-grant-v1';
+    const collapsedProjectLimit = 3;
     const textDecoder = new TextDecoder();
     const textEncoder = new TextEncoder();
 
@@ -53,6 +54,7 @@
     const trigger = document.getElementById('projects-trigger');
     const closeButton = document.getElementById('project-close');
     const projectList = document.getElementById('project-list');
+    const projectMore = document.getElementById('project-more');
     const tokenOverlay = document.getElementById('token-overlay');
     const tokenPanel = tokenOverlay?.querySelector('.token-panel') || null;
     const tokenForm = document.getElementById('token-form');
@@ -94,6 +96,7 @@
         pendingSavedAccess: null,
         pendingPasskeyAccess: null,
         pendingFallbackAccess: null,
+        projectsExpanded: false,
         projects: [],
         sessionVaultKeys: new Map(),
         tokenTimer: 0,
@@ -3773,10 +3776,69 @@
         }, 120);
     }
 
+    function getProjectPublishedTime(project) {
+        const publishedAt = project?.publishedAt || project?.updatedAt || project?.createdAt || '';
+        const timestamp = Date.parse(publishedAt);
+
+        return Number.isFinite(timestamp) ? timestamp : null;
+    }
+
+    function getSortedProjects() {
+        return state.projects
+            .map((project, index) => ({
+                project,
+                index,
+                publishedTime: getProjectPublishedTime(project)
+            }))
+            .sort((a, b) => {
+                const aTime = a.publishedTime;
+                const bTime = b.publishedTime;
+
+                if (aTime !== null || bTime !== null) {
+                    const timeDelta = (bTime ?? -Infinity) - (aTime ?? -Infinity);
+                    if (timeDelta !== 0) return timeDelta;
+                }
+
+                return b.index - a.index;
+            })
+            .map(item => item.project);
+    }
+
+    function renderProjectMoreButton(hasOverflow) {
+        if (!projectMore) return;
+
+        projectMore.hidden = !hasOverflow;
+        projectMore.textContent = state.projectsExpanded ? 'Show less' : 'Show more';
+        projectMore.setAttribute('aria-expanded', state.projectsExpanded ? 'true' : 'false');
+        projectMore.setAttribute('aria-controls', 'project-list');
+    }
+
     function renderProjects() {
         if (!projectList) return;
 
         projectList.innerHTML = '';
+        projectList.classList.remove('is-expanded');
+        renderProjectMoreButton(false);
+
+        const chevronSvg = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3.5 10 8l-4.5 4.5"/></svg>';
+
+        const stateKeyByAccess = {
+            Sealed: 'sealed',
+            Open: 'open',
+            'Device pass': 'device-pass',
+            Loading: 'loading',
+            Offline: 'offline',
+            Empty: 'empty'
+        };
+
+        const statusLabelByAccess = {
+            Sealed: 'sealed',
+            Open: 'open',
+            'Device pass': 'device pass',
+            Loading: 'loading',
+            Offline: 'offline',
+            Empty: 'empty'
+        };
 
         const appendRow = ({
             idText = '',
@@ -3788,11 +3850,24 @@
             taskId = '',
             accessClass = ''
         }, index) => {
-            const row = document.createElement('article');
-            row.className = 'project-row';
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = `project-row project-action${disabled ? ' is-disabled' : ''}`;
             row.style.setProperty('--stagger', index);
+            row.disabled = disabled;
+            if (taskId) {
+                row.dataset.taskId = taskId;
+            }
+            row.setAttribute('aria-label', `${actionLabel} ${label}`);
 
-            const record = document.createElement('div');
+            const indexNode = document.createElement('span');
+            indexNode.className = 'project-row-index';
+            indexNode.setAttribute('aria-hidden', 'true');
+            const derivedIndex = idText
+                || (taskId ? taskId.replace(/^task[-_]?/i, '').replace(/^0*(\d)/, '$1').padStart(2, '0') : String(index + 1).padStart(2, '0'));
+            indexNode.textContent = derivedIndex;
+
+            const record = document.createElement('span');
             record.className = 'project-record';
 
             const recordLabel = document.createElement('span');
@@ -3803,30 +3878,20 @@
             recordMeta.className = 'project-record-meta';
             recordMeta.textContent = meta;
 
-            if (idText) {
-                const recordId = document.createElement('span');
-                recordId.className = 'project-record-id';
-                recordId.textContent = idText;
-                record.append(recordId);
-            }
-
             record.append(recordLabel, recordMeta);
 
-            const accessNode = document.createElement('span');
-            accessNode.className = `project-access${accessClass ? ` ${accessClass}` : ''}`;
-            accessNode.textContent = access;
+            const status = document.createElement('span');
+            const stateKey = stateKeyByAccess[access] || (accessClass.includes('unavailable') ? 'offline' : '');
+            status.className = 'project-row-status';
+            if (stateKey) status.dataset.state = stateKey;
+            status.textContent = statusLabelByAccess[access] || (access ? String(access).toLowerCase() : '');
 
-            const action = document.createElement('button');
-            action.type = 'button';
-            action.className = `project-action${disabled ? ' is-disabled' : ''}`;
-            action.textContent = actionLabel;
-            action.disabled = disabled;
-            action.setAttribute('aria-label', `${actionLabel} ${label}`);
-            if (taskId) {
-                action.dataset.taskId = taskId;
-            }
+            const chevron = document.createElement('span');
+            chevron.className = 'project-row-chevron';
+            chevron.setAttribute('aria-hidden', 'true');
+            chevron.innerHTML = chevronSvg;
 
-            row.append(record, accessNode, action);
+            row.append(indexNode, record, status, chevron);
             projectList.appendChild(row);
         };
 
@@ -3866,7 +3931,16 @@
             return;
         }
 
-        state.projects.forEach((project, index) => {
+        const sortedProjects = getSortedProjects();
+        const hasOverflow = sortedProjects.length > collapsedProjectLimit;
+        const visibleProjects = state.projectsExpanded
+            ? sortedProjects
+            : sortedProjects.slice(0, collapsedProjectLimit);
+
+        projectList.classList.toggle('is-expanded', state.projectsExpanded && hasOverflow);
+        renderProjectMoreButton(hasOverflow);
+
+        visibleProjects.forEach((project, index) => {
             const ticketRecord = getSavedDeviceTicket(project);
             const hasSavedAccess = state.sessionVaultKeys.has(project.id) || canUseSavedDeviceTicket(ticketRecord);
 
@@ -3911,6 +3985,8 @@
 
         window.clearTimeout(state.closeTimer);
         lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        state.projectsExpanded = false;
+        renderProjects();
 
         overlay.hidden = false;
         overlay.setAttribute('aria-hidden', 'false');
@@ -3929,6 +4005,16 @@
         window.setTimeout(() => {
             panel.focus({ preventScroll: true });
         }, 220);
+    }
+
+    function toggleProjectListExpansion() {
+        state.projectsExpanded = !state.projectsExpanded;
+
+        if (!state.projectsExpanded && projectList) {
+            projectList.scrollTop = 0;
+        }
+
+        renderProjects();
     }
 
     function closeProjects(options = {}) {
@@ -4221,6 +4307,7 @@
 
         trigger.addEventListener('click', openProjects);
         closeButton.addEventListener('click', () => closeProjects());
+        projectMore?.addEventListener('click', toggleProjectListExpansion);
 
         overlay.addEventListener('click', event => {
             if (event.target === overlay) {

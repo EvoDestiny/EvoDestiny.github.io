@@ -5,7 +5,8 @@
       "id": "task-01",
       "label": "Task 01",
       "state": "sealed",
-      "bundle": "vault/bundles/task-01.vault.json"
+      "bundle": "vault/bundles/task-01.vault.json",
+      "publishedAt": "2026-04-01T00:00:00+08:00"
     }
   ]
 }
