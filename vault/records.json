@@ -7,6 +7,13 @@
       "state": "sealed",
       "bundle": "vault/bundles/task-01.vault.json",
       "publishedAt": "2026-04-01T00:00:00+08:00"
+    },
+    {
+      "id": "task-02",
+      "label": "Task 02",
+      "state": "sealed",
+      "bundle": "vault/bundles/task-02.vault.json",
+      "publishedAt": "2026-05-03T21:56:37+08:00"
     }
   ]
 }
