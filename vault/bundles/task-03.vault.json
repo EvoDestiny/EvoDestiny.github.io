@@ -1,0 +1,75 @@
+{
+  "version": 6,
+  "taskId": "task-03",
+  "bundleId": "EOTYUhugOwmVThwhCCMVfA",
+  "owner": {
+    "version": 2,
+    "ownerCode": "25051030319",
+    "canonicalSite": "https://evodestiny.github.io",
+    "canonicalRepo": "https://github.com/EvoDestiny/EvoDestiny.github.io",
+    "taskId": "task-03",
+    "label": "Task 03",
+    "bundleId": "EOTYUhugOwmVThwhCCMVfA",
+    "createdAt": "2026-05-29T13:40:24.020Z"
+  },
+  "ownerHash": "eOQ8tKaFzKUcplNrzHnijx48HAstUyl_gejCsSi2-FU",
+  "ownerSignature": {
+    "algorithm": "Ed25519",
+    "canonicalization": "stable-json-v1",
+    "publicKeySpki": "MCowBQYDK2VwAyEAhaxi0Gb2X6Rt7RJZEqQ6wObKR65aV92APgmTMghmqos=",
+    "publicKeyFingerprint": "sha256-nokJLMj2uLM-PMQ2RRKi3dbArdjm7Ex8AfdTsHA9Aiw",
+    "signature": "nbDs_LLZrZn0mCRZ7J7NvpRoqd5Si40OS2rg46eCmLHL1sGzvJiFXiKlZYE_EeBSoNG1Zhkir3k0hoDrQMf6Cw"
+  },
+  "bundle": {
+    "archive": "zip",
+    "cipher": "AES-GCM",
+    "keyDerivation": {
+      "name": "HKDF-SHA-256",
+      "salt": "vZ8+oI1sy6NTs8VqYBHCDyT2YgzpimVYzj8Slal7/lA="
+    },
+    "iv": "Dw/VERTU4cU7cJFl",
+    "ciphertext": "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"
+  },
+  "deviceGrant": {
+    "version": 1,
+    "id": "device-grant-primary",
+    "type": "private-token-argon2id",
+    "cipher": "AES-GCM",
+    "context": {
+      "version": 1,
+      "taskId": "task-03",
+      "bundleId": "EOTYUhugOwmVThwhCCMVfA",
+      "ownerHash": "eOQ8tKaFzKUcplNrzHnijx48HAstUyl_gejCsSi2-FU",
+      "canonicalSite": "https://evodestiny.github.io",
+      "canonicalRepo": "https://github.com/EvoDestiny/EvoDestiny.github.io",
+      "publicKeyFingerprint": "sha256-nokJLMj2uLM-PMQ2RRKi3dbArdjm7Ex8AfdTsHA9Aiw"
+    },
+    "iv": "P7ZmOPDRSFLmMNRz",
+    "wrappedDeviceGrantKey": "0gFsAQivGIdKTHM9kC0Ur06L3MD+wl0ysVFY62Upn4L5v8Xo2Cxc1mlkzqcwLHh+",
+    "kdf": {
+      "name": "Argon2id",
+      "salt": "PrV71ZSSVfkN9uDnrNnUWg==",
+      "memoryKiB": 32768,
+      "passes": 2,
+      "parallelism": 1,
+      "tagLength": 32
+    }
+  },
+  "slots": [
+    {
+      "id": "token-primary",
+      "type": "token-argon2id",
+      "cipher": "AES-GCM",
+      "iv": "ZBXLbUW5I5cxv2DE",
+      "wrappedVaultKey": "nHGdgx6bn2NVGDqdtJAjXAYen74Sbd/S2J2e7+FmPeRm5lOI8RbYgHrFZlkPKXv8",
+      "kdf": {
+        "name": "Argon2id",
+        "salt": "CvAhmyfntXfxymuk3AOMXQ==",
+        "memoryKiB": 32768,
+        "passes": 2,
+        "parallelism": 1,
+        "tagLength": 32
+      }
+    }
+  ]
+}
