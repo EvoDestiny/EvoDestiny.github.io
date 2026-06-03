@@ -1,6 +1,262 @@
 (() => {
     const ease = 'cubic-bezier(0.23, 1, 0.32, 1)';
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // ── i18n ────────────────────────────────────────────────────────────────────
+    const TRANSLATIONS = {
+        en: {
+            phrases: ['Developer & Creator.', 'Crafting elegant digital experiences.', 'Passionate about clean code & design.'],
+            greeting: "Hello, I'm",
+            nav_projects: 'Projects',
+            project_kicker: 'Private Archive',
+            project_title: 'Choose your record',
+            project_description: 'Select a project below. If the record is sealed, the next step will ask for its access token and unlock it locally in your browser.',
+            project_footnote: 'Tokens are verified locally. Nothing is written back into the public site.',
+            pl_archive: 'Project archive',
+            pl_preparing: 'Preparing sealed records',
+            pl_offline: 'Manifest could not be reached',
+            pl_empty: 'No sealed records are published yet',
+            pl_saved_meta: 'Saved device access is available in this browser',
+            pl_sealed_meta: 'Access token required to unlock locally',
+            pl_open_meta: 'Published archive',
+            pl_show_more: 'Show more',
+            pl_show_less: 'Show less',
+            st_sealed: 'sealed',
+            st_open: 'open',
+            st_device_pass: 'device pass',
+            st_loading: 'loading',
+            st_offline: 'offline',
+            st_empty: 'empty',
+            token_kicker: 'Private Access',
+            tok_title_token: 'Enter your token',
+            tok_title_open: 'Open record',
+            tok_title_save: 'Save device access?',
+            tok_title_owner: 'Confirm owner code',
+            tok_desc_open: 'Device access is saved. Open the record in a new tab to continue.',
+            tok_desc_save: 'Save a Passkey for this record. Windows Security may ask you to confirm; if it cannot complete, this browser will save an encrypted local device ticket instead.',
+            tok_desc_passkey: 'Passkey accepted. Enter the top-left owner code to finish decrypting this saved device ticket.',
+            tok_desc_fallback: 'Enter the top-left owner code. This browser key unlocks the saved local fallback ticket.',
+            tok_desc_record: 'Use the access token for {0}. Saving device access also requires the private token.',
+            tok_desc_default: 'Use the access token for this record. The archive is decrypted locally in your browser and opened in a new tab.',
+            tok_submit_token: 'Continue with token',
+            tok_submit_open: 'Open record',
+            tok_submit_save: 'Save Passkey',
+            tok_submit_owner: 'Continue with owner code',
+            tok_cancel_token: 'Back',
+            tok_cancel_open: 'Close',
+            tok_cancel_save: 'Skip',
+            tok_label_token: 'Access token',
+            tok_label_owner: 'Owner code',
+            tok_ph_token: 'Access token',
+            tok_ph_owner: 'Owner code',
+            tok_note_token: 'The access token is never stored. Device saving requires the private token; fallback browser-key tickets are limited to 5 uses or 24 hours.',
+            tok_note_open: 'The next click opens the decrypted record from this browser session.',
+            tok_note_save: 'This happens after the token has been verified, so a failed Passkey attempt will not block opening the record.',
+            tok_note_passkey: 'The saved Passkey ticket was enrolled with the private token; unlock now uses this device and owner code.',
+            tok_note_fallback: 'The local fallback ticket was enrolled with the private token and is limited to 5 uses or 24 hours.',
+            priv_token_label: 'Private token',
+            priv_token_ph: 'Private token',
+            dev_pass_title: 'Remember this device with Passkey',
+            dev_id_label: 'Type the visible owner code',
+            dev_id_detail: 'Type the code shown in the top-left corner to save this device.',
+            priv_token_detail: 'Required only when saving device access.',
+            passkey_btn: 'Use saved Passkey',
+            passkey_detail: 'Saved Passkey unlock is available. Windows Security opens only after you choose Use saved Passkey, then owner code is required.',
+            dp_avail_passkey: 'Saving device access requires the private token; saved Passkey unlock later uses the owner code.',
+            dp_avail_local: 'Saving device access requires the private token; local fallback unlock later uses the owner code.',
+            dp_unavail_bundle: 'This record must be resealed with private device authorization before it can be remembered.',
+            dp_unavail_domain: 'Use localhost or the GitHub Pages HTTPS domain; IP origins only get session access.',
+            dp_unavail_storage: 'This browser will fall back to session-only access if persistent local storage is unavailable.',
+            close_proj_aria: 'Close project archive',
+            close_tok_aria: 'Close token prompt',
+            msg_enter_token: 'Enter the token to unseal this record.',
+            msg_check_owner: 'Checking owner code...',
+            msg_decrypting: 'Decrypting archive...',
+            msg_check_priv: 'Checking private token...',
+            msg_popup: 'Popup blocked. Allow popups for this site first, then try again.',
+            msg_popup_tok: 'Popup blocked. Enter the token after allowing popups for this site.',
+            msg_unsealed: 'Record unsealed. Opening in a new tab...',
+            msg_tok_ok: 'Token accepted. Click Open record to continue.',
+            msg_tok_warn: 'Token accepted, but owner verification needs attention.',
+            msg_tok_save: 'Token accepted. Save this device for faster local unlocks.',
+            msg_open_no_save: 'Open without saving device access.',
+            msg_no_verify: 'Device access was not saved because archive ownership could not be verified.',
+            msg_win_sec: 'Opening Windows Security...',
+            msg_saving_local: 'Saving encrypted local device ticket...',
+            msg_passkey_saved: 'Passkey device ticket saved. Opening record...',
+            msg_local_saved: 'Local device ticket saved. Opening record...',
+            msg_dev_saved: 'Device access saved. Click Open record to continue.',
+            msg_passkey_ok: 'Passkey accepted. Type the visible owner code to continue.',
+            msg_dec_passkey: 'Decrypting saved Passkey access...',
+            msg_passkey_ver: 'Saved Passkey verified. Click Open record to continue.',
+            msg_type_own_pk: 'Type the visible owner code to unlock saved Passkey access.',
+            msg_type_own_lc: 'Type the visible owner code to unlock saved local access.',
+            msg_dec_local: 'Decrypting saved local access...',
+            msg_own_fail: 'Owner code verification failed. Recheck the top-left code before continuing.',
+            msg_pk_avail: 'Saved Passkey unlock is available below the token field. It requires the owner code.',
+            msg_keyboard: 'Type the visible owner code with the keyboard.',
+            msg_dev_fail: 'Device ticket was not saved: {0} You can try again or skip.',
+            msg_pk_fail: 'Saved Passkey failed: {0} Use the token to refresh access.',
+            msg_pk_err: 'Saved Passkey access failed. Recheck the owner code or enter the access token again.',
+            msg_lc_err: 'Saved local access failed. Recheck the owner code or enter the access token again.',
+            msg_recheck: '{0} Recheck the owner code or enter the access token again.',
+            msg_pk_recheck: '{0} Saved Passkey unlock is available below the token field and requires the owner code.',
+            msg_unable: 'Unable to unlock this record.',
+            risk_title: 'Owner verification warning',
+            risk_code_fail: 'Verification failed',
+            risk_integrity: 'Page integrity',
+            risk_integrity_v: 'Check the original site before continuing',
+            risk_risk: 'Risk',
+            risk_risk_v: 'Altered or impersonated submission',
+            risk_msg: 'The owner code did not pass security verification. If the code you typed matches the top-left code, check whether this page was altered or is being used as an impersonated submission.',
+            risk_action: 'Review owner code',
+            ov_verified: 'Verified archive owner',
+            ov_warning: 'Owner verification warning',
+            ov_owner_code: 'Owner code',
+            ov_site: 'Canonical site',
+            ov_repo: 'Canonical repo',
+            ov_task: 'Task ID',
+            ov_bundle: 'Bundle ID',
+            ov_sig: 'Signature',
+            ov_key: 'Public key',
+        },
+        zh: {
+            phrases: ['开发者 & 创作者。', '匠心打造精致数字体验。', '热爱简洁代码与优雅设计。'],
+            greeting: '你好，我是',
+            nav_projects: '项目',
+            project_kicker: '私人档案馆',
+            project_title: '选择你的档案',
+            project_description: '在下方选择一个项目。若档案已封存，下一步将要求输入访问令牌并在本地浏览器中解锁。',
+            project_footnote: '令牌仅在本地验证，不会写入公共站点。',
+            pl_archive: '项目档案',
+            pl_preparing: '正在准备封存记录',
+            pl_offline: '档案清单无法访问',
+            pl_empty: '暂无已发布的封存记录',
+            pl_saved_meta: '此浏览器已保存设备访问',
+            pl_sealed_meta: '需要访问令牌以在本地解锁',
+            pl_open_meta: '已发布档案',
+            pl_show_more: '显示更多',
+            pl_show_less: '收起',
+            st_sealed: '已封存',
+            st_open: '已开放',
+            st_device_pass: '设备通行证',
+            st_loading: '加载中',
+            st_offline: '离线',
+            st_empty: '空',
+            token_kicker: '私人访问',
+            tok_title_token: '输入您的令牌',
+            tok_title_open: '打开记录',
+            tok_title_save: '保存设备访问？',
+            tok_title_owner: '确认所有者代码',
+            tok_desc_open: '设备访问已保存。在新标签页中打开记录以继续。',
+            tok_desc_save: '为此记录保存 Passkey。Windows 安全中心可能会要求您确认；若无法完成，浏览器将保存加密的本地设备票据。',
+            tok_desc_passkey: 'Passkey 已接受。请输入左上角的所有者代码以完成解密。',
+            tok_desc_fallback: '请输入左上角的所有者代码。此浏览器密钥将解锁已保存的本地备用票据。',
+            tok_desc_record: '使用 {0} 的访问令牌。保存设备访问还需要私人令牌。',
+            tok_desc_default: '使用此记录的访问令牌。档案将在您的浏览器本地解密，并在新标签页中打开。',
+            tok_submit_token: '使用令牌继续',
+            tok_submit_open: '打开记录',
+            tok_submit_save: '保存 Passkey',
+            tok_submit_owner: '使用所有者代码继续',
+            tok_cancel_token: '返回',
+            tok_cancel_open: '关闭',
+            tok_cancel_save: '跳过',
+            tok_label_token: '访问令牌',
+            tok_label_owner: '所有者代码',
+            tok_ph_token: '访问令牌',
+            tok_ph_owner: '所有者代码',
+            tok_note_token: '访问令牌不会被存储。保存设备需要私人令牌；备用浏览器密钥票据最多使用 5 次或 24 小时。',
+            tok_note_open: '下一次点击将从此浏览器会话中打开已解密的记录。',
+            tok_note_save: '令牌验证后才会执行此操作，因此 Passkey 失败不会阻止记录打开。',
+            tok_note_passkey: '已保存的 Passkey 票据是用私人令牌注册的；现在使用此设备和所有者代码解锁。',
+            tok_note_fallback: '本地备用票据是用私人令牌注册的，最多使用 5 次或 24 小时。',
+            priv_token_label: '私人令牌',
+            priv_token_ph: '私人令牌',
+            dev_pass_title: '用 Passkey 记住此设备',
+            dev_id_label: '输入可见的所有者代码',
+            dev_id_detail: '输入左上角显示的代码以保存此设备。',
+            priv_token_detail: '仅在保存设备访问时需要。',
+            passkey_btn: '使用已保存的 Passkey',
+            passkey_detail: '已保存 Passkey 解锁可用。选择后 Windows 安全中心才会打开，之后需要所有者代码。',
+            dp_avail_passkey: '保存设备访问需要私人令牌；之后 Passkey 解锁使用所有者代码。',
+            dp_avail_local: '保存设备访问需要私人令牌；之后本地备用解锁使用所有者代码。',
+            dp_unavail_bundle: '此记录需要重新封装后才能保存设备授权。',
+            dp_unavail_domain: '请使用 localhost 或 GitHub Pages HTTPS 域名；IP 来源只能获得会话访问。',
+            dp_unavail_storage: '如果持久本地存储不可用，此浏览器将回退到仅会话访问。',
+            close_proj_aria: '关闭项目档案',
+            close_tok_aria: '关闭令牌提示',
+            msg_enter_token: '请输入令牌以解封此记录。',
+            msg_check_owner: '正在验证所有者代码…',
+            msg_decrypting: '正在解密档案…',
+            msg_check_priv: '正在验证私人令牌…',
+            msg_popup: '弹窗被拦截。请先允许此站点弹窗，然后重试。',
+            msg_popup_tok: '弹窗被拦截。允许弹窗后请输入令牌。',
+            msg_unsealed: '记录已解封，正在新标签页中打开…',
+            msg_tok_ok: '令牌已接受。点击"打开记录"继续。',
+            msg_tok_warn: '令牌已接受，但所有者验证需要注意。',
+            msg_tok_save: '令牌已接受。保存此设备以便更快速的本地解锁。',
+            msg_open_no_save: '不保存设备访问，直接打开。',
+            msg_no_verify: '由于无法验证档案所有权，设备访问未被保存。',
+            msg_win_sec: '正在打开 Windows 安全中心…',
+            msg_saving_local: '正在保存加密本地设备票据…',
+            msg_passkey_saved: 'Passkey 设备票据已保存，正在打开记录…',
+            msg_local_saved: '本地设备票据已保存，正在打开记录…',
+            msg_dev_saved: '设备访问已保存。点击"打开记录"继续。',
+            msg_passkey_ok: 'Passkey 已接受。请输入可见的所有者代码以继续。',
+            msg_dec_passkey: '正在解密已保存的 Passkey 访问…',
+            msg_passkey_ver: '已保存的 Passkey 已验证。点击"打开记录"继续。',
+            msg_type_own_pk: '请输入可见的所有者代码以解锁已保存的 Passkey 访问。',
+            msg_type_own_lc: '请输入可见的所有者代码以解锁已保存的本地访问。',
+            msg_dec_local: '正在解密已保存的本地访问…',
+            msg_own_fail: '所有者代码验证失败。继续前请重新检查左上角代码。',
+            msg_pk_avail: '令牌输入框下方有已保存的 Passkey 解锁，需要所有者代码。',
+            msg_keyboard: '请用键盘输入可见的所有者代码。',
+            msg_dev_fail: '设备票据未能保存：{0} 您可以重试或跳过。',
+            msg_pk_fail: '已保存的 Passkey 失败：{0} 请使用令牌刷新访问。',
+            msg_pk_err: '已保存的 Passkey 访问失败。请重新检查所有者代码或重新输入访问令牌。',
+            msg_lc_err: '已保存的本地访问失败。请重新检查所有者代码或重新输入访问令牌。',
+            msg_recheck: '{0} 请重新检查所有者代码或重新输入访问令牌。',
+            msg_pk_recheck: '{0} 令牌输入框下方有已保存的 Passkey 解锁，需要所有者代码。',
+            msg_unable: '无法解锁此记录。',
+            risk_title: '所有者验证警告',
+            risk_code_fail: '验证失败',
+            risk_integrity: '页面完整性',
+            risk_integrity_v: '继续前请检查原始站点',
+            risk_risk: '风险',
+            risk_risk_v: '页面被篡改或冒充提交',
+            risk_msg: '所有者代码未通过安全验证。如果您输入的代码与左上角代码一致，请检查此页面是否被篡改或用于冒充提交。',
+            risk_action: '查看所有者代码',
+            ov_verified: '已验证档案所有者',
+            ov_warning: '所有者验证警告',
+            ov_owner_code: '所有者代码',
+            ov_site: '规范站点',
+            ov_repo: '规范仓库',
+            ov_task: '任务 ID',
+            ov_bundle: '包 ID',
+            ov_sig: '签名',
+            ov_key: '公钥',
+        }
+    };
+
+    let currentLang = (() => {
+        try {
+            const saved = localStorage.getItem('evo-lang');
+            if (saved) return saved;
+            const browserLang = (navigator.languages?.[0] || navigator.language || 'en').toLowerCase();
+            return browserLang.startsWith('zh') ? 'zh' : 'en';
+        } catch (e) { return 'en'; }
+    })();
+    const t = (key) => {
+        const tr = TRANSLATIONS[currentLang] || TRANSLATIONS.en;
+        return tr[key] !== undefined ? tr[key] : (TRANSLATIONS.en[key] !== undefined ? TRANSLATIONS.en[key] : key);
+    };
+    const tFmt = (key, ...args) => {
+        let s = t(key);
+        args.forEach((v, i) => { s = s.replace(`{${i}}`, v); });
+        return s;
+    };
+    // ────────────────────────────────────────────────────────────────────────────
+
     const manifestUrl = 'vault/records.json';
     const vaultMetaFile = '__vault.json';
     const devicePassDbName = 'evo-vault-device-passes';
@@ -19,11 +275,7 @@
     const textDecoder = new TextDecoder();
     const textEncoder = new TextEncoder();
 
-    const phrases = [
-        'Developer & Creator.',
-        'Crafting elegant digital experiences.',
-        'Passionate about clean code & design.'
-    ];
+    let phrases = TRANSLATIONS[currentLang].phrases || TRANSLATIONS.en.phrases;
 
     const mimeTypes = {
         '.css': 'text/css; charset=utf-8',
@@ -456,19 +708,19 @@
         dialog.setAttribute('aria-hidden', 'true');
         dialog.innerHTML = `
             <section class="owner-risk-panel owner-verification" data-tone="error" role="alertdialog" aria-modal="true" aria-labelledby="owner-risk-title" aria-describedby="owner-risk-message" tabindex="-1">
-                <p class="owner-verification-title" id="owner-risk-title">Owner verification warning</p>
+                <p class="owner-verification-title" id="owner-risk-title">${escapeHtml(t('risk_title'))}</p>
                 <dl class="owner-verification-grid">
-                    <dt>Owner code</dt>
-                    <dd id="owner-risk-code">Verification failed</dd>
-                    <dt>Page integrity</dt>
-                    <dd>Check the original site before continuing</dd>
-                    <dt>Risk</dt>
-                    <dd>Altered or impersonated submission</dd>
+                    <dt>${escapeHtml(t('ov_owner_code'))}</dt>
+                    <dd id="owner-risk-code">${escapeHtml(t('risk_code_fail'))}</dd>
+                    <dt>${escapeHtml(t('risk_integrity'))}</dt>
+                    <dd>${escapeHtml(t('risk_integrity_v'))}</dd>
+                    <dt>${escapeHtml(t('risk_risk'))}</dt>
+                    <dd>${escapeHtml(t('risk_risk_v'))}</dd>
                 </dl>
                 <p class="owner-verification-message" id="owner-risk-message">
-                    The owner code did not pass security verification. If the code you typed matches the top-left code, check whether this page was altered or is being used as an impersonated submission.
+                    ${escapeHtml(t('risk_msg'))}
                 </p>
-                <button type="button" class="owner-risk-action">Review owner code</button>
+                <button type="button" class="owner-risk-action">${escapeHtml(t('risk_action'))}</button>
             </section>
         `;
 
@@ -495,7 +747,7 @@
     }
 
     function showOwnerCodeRiskWarning() {
-        setTokenStatus('Owner code verification failed. Recheck the top-left code before continuing.', 'error');
+        setTokenStatus(t('msg_own_fail'), 'error');
 
         const dialog = ensureOwnerCodeRiskDialog();
         const panel = dialog.querySelector('.owner-risk-panel');
@@ -1022,20 +1274,20 @@
     function getOwnerVerificationRows(ownerVerification) {
         const owner = ownerVerification?.owner || {};
         return [
-            ['Owner code', getOwnerCodeFromOwner(owner) || ownerVerification?.claimedOwnerCode || 'Unknown'],
-            ['Canonical site', owner.canonicalSite || 'Unknown'],
-            ['Canonical repo', owner.canonicalRepo || 'Unknown'],
-            ['Task ID', owner.taskId || ownerVerification?.taskId || 'Unknown'],
-            ['Bundle ID', owner.bundleId || ownerVerification?.bundleId || 'Unknown'],
-            ['Signature', ownerVerification?.signatureStatus || 'unknown'],
-            ['Public key', ownerVerification?.publicKeyFingerprint || 'Unknown']
+            [t('ov_owner_code'), getOwnerCodeFromOwner(owner) || ownerVerification?.claimedOwnerCode || 'Unknown'],
+            [t('ov_site'), owner.canonicalSite || 'Unknown'],
+            [t('ov_repo'), owner.canonicalRepo || 'Unknown'],
+            [t('ov_task'), owner.taskId || ownerVerification?.taskId || 'Unknown'],
+            [t('ov_bundle'), owner.bundleId || ownerVerification?.bundleId || 'Unknown'],
+            [t('ov_sig'), ownerVerification?.signatureStatus || 'unknown'],
+            [t('ov_key'), ownerVerification?.publicKeyFingerprint || 'Unknown']
         ];
     }
 
     function buildOwnerVerificationMarkup(ownerVerification, compact = false) {
         if (!ownerVerification) return '';
 
-        const title = ownerVerification.ownerVerified ? 'Verified archive owner' : 'Owner verification warning';
+        const title = ownerVerification.ownerVerified ? t('ov_verified') : t('ov_warning');
         const rows = getOwnerVerificationRows(ownerVerification);
         const details = rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('');
         const messages = ownerVerification.messages?.length
@@ -1440,13 +1692,13 @@
         if (devicePassDetail) {
             devicePassDetail.textContent = isAvailable
                 ? hasPasskeyPrfAttempt
-                    ? 'Saving device access requires the private token; saved Passkey unlock later uses the owner code.'
-                    : 'Saving device access requires the private token; local fallback unlock later uses the owner code.'
+                    ? t('dp_avail_passkey')
+                    : t('dp_avail_local')
                 : !isSupportedBundle
-                    ? 'This record must be resealed with private device authorization before it can be remembered.'
+                    ? t('dp_unavail_bundle')
                     : rpId
-                        ? 'This browser will fall back to session-only access if persistent local storage is unavailable.'
-                        : 'Use localhost or the GitHub Pages HTTPS domain; IP origins only get session access.';
+                        ? t('dp_unavail_storage')
+                        : t('dp_unavail_domain');
         }
 
         updateDeviceIdConfirmation();
@@ -1559,7 +1811,7 @@
         }
 
         if (savedPasskeyDetail && isVisible) {
-            savedPasskeyDetail.textContent = 'Saved Passkey unlock is available. Windows Security opens only after you choose Use saved Passkey, then owner code is required.';
+            savedPasskeyDetail.textContent = t('passkey_detail');
         }
     }
 
@@ -3055,7 +3307,7 @@
         if (tokenField) tokenField.hidden = isPostTokenMode;
         if (tokenLabel) tokenLabel.hidden = isPostTokenMode;
         if (tokenLabel && !isPostTokenMode) {
-            tokenLabel.textContent = isOwnerCodeMode ? 'Owner code' : 'Access token';
+            tokenLabel.textContent = isOwnerCodeMode ? t('tok_label_owner') : t('tok_label_token');
         }
         if (devicePassOption) devicePassOption.hidden = isPostTokenMode || isOwnerCodeMode;
         if (deviceIdConfirm) deviceIdConfirm.hidden = true;
@@ -3068,59 +3320,59 @@
                 tokenInput.type = 'text';
                 tokenInput.inputMode = 'numeric';
                 tokenInput.autocomplete = 'off';
-                tokenInput.placeholder = 'Owner code';
+                tokenInput.placeholder = t('tok_ph_owner');
             } else {
                 tokenInput.type = 'password';
                 tokenInput.inputMode = 'text';
                 tokenInput.autocomplete = 'one-time-code';
-                tokenInput.placeholder = 'Access token';
+                tokenInput.placeholder = t('tok_ph_token');
             }
         }
 
         if (tokenTitle) {
             tokenTitle.textContent = isOpenRecordMode
-                ? 'Open record'
+                ? t('tok_title_open')
                 : isSaveDeviceMode
-                    ? 'Save device access?'
-                    : isOwnerCodeMode ? 'Confirm owner code' : 'Enter your token';
+                    ? t('tok_title_save')
+                    : isOwnerCodeMode ? t('tok_title_owner') : t('tok_title_token');
         }
 
         if (tokenDescription) {
             tokenDescription.textContent = isOpenRecordMode
-                ? 'Device access is saved. Open the record in a new tab to continue.'
+                ? t('tok_desc_open')
                 : isSaveDeviceMode
-                    ? 'Save a Passkey for this record. Windows Security may ask you to confirm; if it cannot complete, this browser will save an encrypted local device ticket instead.'
+                    ? t('tok_desc_save')
                 : isPasskeyOwnerCodeMode
-                    ? 'Passkey accepted. Enter the top-left owner code to finish decrypting this saved device ticket.'
+                    ? t('tok_desc_passkey')
                 : isFallbackOwnerCodeMode
-                    ? 'Enter the top-left owner code. This browser key unlocks the saved local fallback ticket.'
+                    ? t('tok_desc_fallback')
                 : record
-                    ? `Use the access token for ${record.label}. Saving device access also requires the private token.`
-                    : 'Use the access token for this record. The archive is decrypted locally in your browser and opened in a new tab.';
+                    ? tFmt('tok_desc_record', record.label)
+                    : t('tok_desc_default');
         }
 
         if (tokenSubmit) {
             tokenSubmit.textContent = isOpenRecordMode
-                ? 'Open record'
-                : isSaveDeviceMode ? 'Save Passkey' : isOwnerCodeMode ? 'Continue with owner code' : 'Continue with token';
+                ? t('tok_submit_open')
+                : isSaveDeviceMode ? t('tok_submit_save') : isOwnerCodeMode ? t('tok_submit_owner') : t('tok_submit_token');
         }
 
         if (tokenCancel) {
             tokenCancel.textContent = isOpenRecordMode
-                ? 'Close'
-                : isSaveDeviceMode ? 'Skip' : 'Back';
+                ? t('tok_cancel_open')
+                : isSaveDeviceMode ? t('tok_cancel_save') : t('tok_cancel_token');
         }
 
         if (tokenNote) {
             tokenNote.textContent = isOpenRecordMode
-                ? 'The next click opens the decrypted record from this browser session.'
+                ? t('tok_note_open')
                 : isSaveDeviceMode
-                    ? 'This happens after the token has been verified, so a failed Passkey attempt will not block opening the record.'
+                    ? t('tok_note_save')
                 : isPasskeyOwnerCodeMode
-                    ? 'The saved Passkey ticket was enrolled with the private token; unlock now uses this device and owner code.'
+                    ? t('tok_note_passkey')
                 : isFallbackOwnerCodeMode
-                    ? 'The local fallback ticket was enrolled with the private token and is limited to 5 uses or 24 hours.'
-                : defaultTokenNote;
+                    ? t('tok_note_fallback')
+                : t('tok_note_token');
         }
 
         const ownerVerification = state.pendingUnlock?.ownerVerification || state.pendingSavedAccess?.ownerVerification || null;
@@ -3136,14 +3388,15 @@
             rememberDeviceRequested: true
         };
         setTokenPromptMode('saveDevice', pendingUnlock.record);
-        setTokenStatus('Token accepted. Save this device for faster local unlocks.', 'success');
+        setTokenStatus(t('msg_tok_save'), 'success');
 
         window.setTimeout(() => {
             tokenSubmit?.focus({ preventScroll: true });
         }, reduceMotion ? 0 : 120);
     }
 
-    function showOpenRecordPrompt(pendingUnlock, message = 'Token accepted. Click Open record to continue.') {
+    function showOpenRecordPrompt(pendingUnlock, message) {
+        if (message === undefined) message = t('msg_tok_ok');
         state.pendingUnlock = {
             ...pendingUnlock,
             readyToOpen: true
@@ -3185,7 +3438,7 @@
 
         const viewerWindow = openPendingViewerWindow(pendingUnlock);
         if (!viewerWindow) {
-            setTokenStatus('Popup blocked. Allow popups for this site first, then try again.', 'error');
+            setTokenStatus(t('msg_popup'), 'error');
             return;
         }
 
@@ -3196,7 +3449,7 @@
         }
 
         viewerWindow.location.replace(pendingUnlock.viewerUrl);
-        setTokenStatus('Record unsealed. Opening in a new tab...', 'success');
+        setTokenStatus(t('msg_unsealed'), 'success');
         closeTokenPrompt({ restorePanelFocus: false });
         closeProjects({ restorePageFocus: false });
     }
@@ -3216,13 +3469,13 @@
     function finishDeviceTicketSave(pendingUnlock, ticketResult) {
         setTokenStatus(
             ticketResult.protection === 'passkey-prf'
-                ? 'Passkey device ticket saved. Opening record...'
-                : 'Local device ticket saved. Opening record...',
+                ? t('msg_passkey_saved')
+                : t('msg_local_saved'),
             'success'
         );
         pendingUnlock.readyToOpen = true;
         setTokenPromptMode('openRecord', pendingUnlock.record);
-        setTokenStatus('Device access saved. Click Open record to continue.', 'success');
+        setTokenStatus(t('msg_dev_saved'), 'success');
         window.setTimeout(() => {
             tokenSubmit?.focus({ preventScroll: true });
         }, reduceMotion ? 0 : 120);
@@ -3238,16 +3491,16 @@
             return;
         }
         if (!pendingUnlock.ownerVerification?.ownerVerified) {
-            setTokenStatus('Device access was not saved because archive ownership could not be verified.', 'error');
-            showOpenRecordPrompt(pendingUnlock, 'Open without saving device access.');
+            setTokenStatus(t('msg_no_verify'), 'error');
+            showOpenRecordPrompt(pendingUnlock, t('msg_open_no_save'));
             return;
         }
 
         setUnlockBusy(true);
         setTokenStatus(
             canAttemptPasskeyPrf()
-                ? 'Opening Windows Security...'
-                : 'Saving encrypted local device ticket...',
+                ? t('msg_win_sec')
+                : t('msg_saving_local'),
             'success'
         );
 
@@ -3264,7 +3517,7 @@
         } catch (error) {
             console.warn('Device ticket creation failed:', error);
             const reason = getErrorMessage(error);
-            setTokenStatus(`Device ticket was not saved: ${reason} You can try again or skip.`, 'error');
+            setTokenStatus(tFmt('msg_dev_fail', reason), 'error');
         } finally {
             setUnlockBusy(false);
         }
@@ -3276,7 +3529,7 @@
 
         const viewerWindow = openViewerWindow();
         if (!viewerWindow) {
-            setTokenStatus('Popup blocked. Allow popups for this site first, then try again.', 'error');
+            setTokenStatus(t('msg_popup'), 'error');
             return;
         }
 
@@ -3284,7 +3537,7 @@
         viewerWindow.location.replace(pendingSavedAccess.viewerUrl);
 
         state.pendingSavedAccess = null;
-        setTokenStatus('Record unsealed. Opening in a new tab...', 'success');
+        setTokenStatus(t('msg_unsealed'), 'success');
         closeTokenPrompt({ restorePanelFocus: false });
         closeProjects({ restorePageFocus: false });
     }
@@ -3297,7 +3550,7 @@
         if (!record || !canUseSavedDeviceTicket(savedPasskeyTicket)) return;
 
         setUnlockBusy(true);
-        setTokenStatus('Opening Windows Security...', 'success');
+        setTokenStatus(t('msg_win_sec'), 'success');
 
         try {
             const bundlePayload = await fetchBundlePayload(record);
@@ -3332,7 +3585,7 @@
                 privateTokenInput.value = '';
             }
             setTokenPromptMode('passkeyOwnerCode', record);
-            setTokenStatus('Passkey accepted. Type the visible owner code to continue.', 'success');
+            setTokenStatus(t('msg_passkey_ok'), 'success');
             window.setTimeout(() => {
                 tokenInput?.focus({ preventScroll: true });
             }, reduceMotion ? 0 : 120);
@@ -3340,7 +3593,7 @@
             console.warn('Saved Passkey access failed:', error);
             const reason = getErrorMessage(error);
 
-            setTokenStatus(`Saved Passkey failed: ${reason} Use the token to refresh access.`, 'error');
+            setTokenStatus(tFmt('msg_pk_fail', reason), 'error');
             configureSavedPasskeyOption(record, 'token');
         } finally {
             setUnlockBusy(false);
@@ -3355,7 +3608,7 @@
 
         const ownerCode = tokenInput.value.replace(/\D/g, '');
         if (!ownerCode) {
-            setTokenStatus('Type the visible owner code to unlock saved Passkey access.', 'error');
+            setTokenStatus(t('msg_type_own_pk'), 'error');
             tokenInput.focus({ preventScroll: true });
             return;
         }
@@ -3370,7 +3623,7 @@
 
         const { record, bundlePayload, ticketRecord, prfResults, nextSalt } = pendingPasskey;
         setUnlockBusy(true);
-        setTokenStatus('Decrypting saved Passkey access...', 'success');
+        setTokenStatus(t('msg_dec_passkey'), 'success');
 
         try {
             if (!ticketRecord || ticketRecord.bundleId !== getBundleId(bundlePayload)) {
@@ -3417,7 +3670,7 @@
             };
 
             setTokenPromptMode('openRecord', record);
-            setTokenStatus('Saved Passkey verified. Click Open record to continue.', 'success');
+            setTokenStatus(t('msg_passkey_ver'), 'success');
             window.setTimeout(() => {
                 tokenSubmit?.focus({ preventScroll: true });
             }, reduceMotion ? 0 : 120);
@@ -3425,8 +3678,8 @@
             console.warn('Saved Passkey owner code unlock failed:', error);
             setTokenStatus(
                 error instanceof Error
-                    ? `${error.message} Recheck the owner code or enter the access token again.`
-                    : 'Saved Passkey access failed. Recheck the owner code or enter the access token again.',
+                    ? tFmt('msg_recheck', error.message)
+                    : t('msg_pk_err'),
                 'error'
             );
             tokenInput.focus({ preventScroll: true });
@@ -3444,7 +3697,7 @@
 
         const ownerCode = tokenInput.value.replace(/\D/g, '');
         if (!ownerCode) {
-            setTokenStatus('Type the visible owner code to unlock saved local access.', 'error');
+            setTokenStatus(t('msg_type_own_lc'), 'error');
             tokenInput.focus({ preventScroll: true });
             return;
         }
@@ -3472,13 +3725,13 @@
 
         const viewerWindow = openViewerWindow();
         if (!viewerWindow) {
-            setTokenStatus('Popup blocked. Allow popups for this site first, then try again.', 'error');
+            setTokenStatus(t('msg_popup'), 'error');
             return;
         }
 
         writeViewerPlaceholder(viewerWindow, record.label);
         setUnlockBusy(true);
-        setTokenStatus('Decrypting saved local access...', 'success');
+        setTokenStatus(t('msg_dec_local'), 'success');
 
         try {
             const ticketRecord = getSavedLocalFallbackTicket(record);
@@ -3497,8 +3750,8 @@
             console.warn('Saved local access failed:', error);
             setTokenStatus(
                 error instanceof Error
-                    ? `${error.message} Recheck the owner code or enter the access token again.`
-                    : 'Saved local access failed. Recheck the owner code or enter the access token again.',
+                    ? tFmt('msg_recheck', error.message)
+                    : t('msg_lc_err'),
                 'error'
             );
             tokenInput.focus({ preventScroll: true });
@@ -3603,7 +3856,7 @@
         if (!isOwnerCodePromptMode()) return;
 
         event.preventDefault();
-        setTokenStatus('Type the visible owner code with the keyboard.', 'error');
+        setTokenStatus(t('msg_keyboard'), 'error');
     }
 
     function handleDevicePassToggle() {
@@ -3624,7 +3877,7 @@
 
     function blockDeviceIdTransfer(event) {
         event.preventDefault();
-        setTokenStatus('Type the visible owner code with the keyboard.', 'error');
+        setTokenStatus(t('msg_keyboard'), 'error');
     }
 
     function restoreFocus() {
@@ -3808,7 +4061,7 @@
         if (!projectMore) return;
 
         projectMore.hidden = !hasOverflow;
-        projectMore.textContent = state.projectsExpanded ? 'Show less' : 'Show more';
+        projectMore.textContent = state.projectsExpanded ? t('pl_show_less') : t('pl_show_more');
         projectMore.setAttribute('aria-expanded', state.projectsExpanded ? 'true' : 'false');
         projectMore.setAttribute('aria-controls', 'project-list');
     }
@@ -3832,12 +4085,12 @@
         };
 
         const statusLabelByAccess = {
-            Sealed: 'sealed',
-            Open: 'open',
-            'Device pass': 'device pass',
-            Loading: 'loading',
-            Offline: 'offline',
-            Empty: 'empty'
+            Sealed: t('st_sealed'),
+            Open: t('st_open'),
+            'Device pass': t('st_device_pass'),
+            Loading: t('st_loading'),
+            Offline: t('st_offline'),
+            Empty: t('st_empty')
         };
 
         const appendRow = ({
@@ -3897,8 +4150,8 @@
 
         if (!state.manifestLoaded && !state.manifestError) {
             appendRow({
-                label: 'Project archive',
-                meta: 'Preparing sealed records',
+                label: t('pl_archive'),
+                meta: t('pl_preparing'),
                 access: 'Loading',
                 actionLabel: 'Wait',
                 disabled: true,
@@ -3909,8 +4162,8 @@
 
         if (state.manifestError) {
             appendRow({
-                label: 'Project archive',
-                meta: 'Manifest could not be reached',
+                label: t('pl_archive'),
+                meta: t('pl_offline'),
                 access: 'Offline',
                 actionLabel: 'Unavailable',
                 disabled: true,
@@ -3921,8 +4174,8 @@
 
         if (!state.projects.length) {
             appendRow({
-                label: 'Project archive',
-                meta: 'No sealed records are published yet',
+                label: t('pl_archive'),
+                meta: t('pl_empty'),
                 access: 'Empty',
                 actionLabel: 'Unavailable',
                 disabled: true,
@@ -3947,8 +4200,8 @@
             appendRow({
                 label: project.label,
                 meta: hasSavedAccess
-                    ? 'Saved device access is available in this browser'
-                    : project.state === 'sealed' ? 'Access token required to unlock locally' : 'Published archive',
+                    ? t('pl_saved_meta')
+                    : project.state === 'sealed' ? t('pl_sealed_meta') : t('pl_open_meta'),
                 access: hasSavedAccess ? 'Device pass' : project.state === 'sealed' ? 'Sealed' : 'Open',
                 actionLabel: 'Continue',
                 disabled: false,
@@ -4115,7 +4368,7 @@
 
         if (!hasSessionAccess && hasPasskeyAccess) {
             openTokenPrompt(record.id);
-            setTokenStatus('Saved Passkey unlock is available below the token field. It requires the owner code.', 'success');
+            setTokenStatus(t('msg_pk_avail'), 'success');
             return;
         }
 
@@ -4132,7 +4385,7 @@
         const viewerWindow = openViewerWindow();
         if (!viewerWindow) {
             openTokenPrompt(record.id);
-            setTokenStatus('Popup blocked. Enter the token after allowing popups for this site.', 'error');
+            setTokenStatus(t('msg_popup_tok'), 'error');
             return;
         }
 
@@ -4146,13 +4399,13 @@
                 openTokenPrompt(record.id);
                 setTokenStatus(
                     error instanceof Error
-                        ? `${error.message} Saved Passkey unlock is available below the token field and requires the owner code.`
-                        : 'Saved Passkey access requires confirmation.',
+                        ? tFmt('msg_pk_recheck', error.message)
+                        : t('msg_pk_err'),
                     'error'
                 );
             } else {
                 openTokenPrompt(record.id);
-                setTokenStatus(error instanceof Error ? error.message : 'Saved access failed. Enter the token again.', 'error');
+                setTokenStatus(error instanceof Error ? error.message : t('msg_lc_err'), 'error');
             }
         }
     }
@@ -4164,7 +4417,7 @@
 
         const token = tokenInput.value.trim();
         if (!token) {
-            setTokenStatus('Enter the token to unseal this record.', 'error');
+            setTokenStatus(t('msg_enter_token'), 'error');
             tokenInput.focus({ preventScroll: true });
             return;
         }
@@ -4172,7 +4425,7 @@
         clearClipboardSilently();
 
         setUnlockBusy(true);
-        setTokenStatus(devicePassInput?.checked ? 'Checking owner code...' : 'Decrypting archive...', 'success');
+        setTokenStatus(devicePassInput?.checked ? t('msg_check_owner') : t('msg_decrypting'), 'success');
 
         try {
             const bundlePayload = await fetchBundlePayload(state.activeRecord);
@@ -4195,13 +4448,13 @@
                     return;
                 }
 
-                const privateToken = requirePrivateTokenValue('Enter the private token to save device access.');
+                const privateToken = requirePrivateTokenValue();
                 ownerHash = ownerCodeCheck.ownerHash || await getClaimedOwnerHash(bundlePayload, ownerCodeCheck.typedCode);
-                setTokenStatus('Checking private token...', 'success');
+                setTokenStatus(t('msg_check_priv'), 'success');
                 deviceGrant = await unwrapDeviceGrantWithPrivateToken(bundlePayload, privateToken, ownerHash || '');
             }
 
-            setTokenStatus('Decrypting archive...', 'success');
+            setTokenStatus(t('msg_decrypting'), 'success');
             ownerHash = ownerHash || await getClaimedOwnerHash(bundlePayload);
             const unlockResult = await decryptBundleWithToken(bundlePayload, token, ownerHash);
             const fileMap = unpackArchive(unlockResult.archiveBytes);
@@ -4242,9 +4495,9 @@
                 ownerVerification,
                 viewerUrl,
                 viewerWindow: null
-            }, ownerVerification.ownerVerified ? 'Token accepted. Click Open record to continue.' : 'Token accepted, but owner verification needs attention.');
+            }, ownerVerification.ownerVerified ? t('msg_tok_ok') : t('msg_tok_warn'));
         } catch (error) {
-            setTokenStatus(error instanceof Error ? error.message : 'Unable to unlock this record.', 'error');
+            setTokenStatus(error instanceof Error ? error.message : t('msg_unable'), 'error');
             if (error?.privateTokenError) {
                 privateTokenInput?.focus({ preventScroll: true });
                 privateTokenInput?.select();
@@ -4383,6 +4636,12 @@
             ownerCode.style.opacity = '1';
         }
 
+        const langToggleEl = document.getElementById('lang-toggle');
+        if (langToggleEl) {
+            langToggleEl.style.transition = reduceMotion ? 'none' : 'opacity 3s ease';
+            langToggleEl.style.opacity = '1';
+        }
+
         if (tagline) {
             if (reduceMotion) {
                 tagline.style.opacity = '1';
@@ -4459,7 +4718,140 @@
         window.setTimeout(typeStep, 400);
     }
 
+    function applyLanguage() {
+        // Update phrases and restart typing animation
+        phrases = TRANSLATIONS[currentLang].phrases || TRANSLATIONS.en.phrases;
+        phraseIdx = 0;
+        charIdx = 0;
+        deleting = false;
+        if (typedEl) typedEl.textContent = '';
+
+        // Save preference
+        try { localStorage.setItem('evo-lang', currentLang); } catch (e) {}
+
+        // Update lang toggle button label (show the other lang as the toggle target)
+        const langBtn = document.getElementById('lang-toggle');
+        if (langBtn) {
+            const langLabel = langBtn.querySelector('.lang-label');
+            if (langLabel) langLabel.textContent = currentLang === 'zh' ? 'EN' : 'ZH';
+        }
+
+        // Page-level static text
+        const greetingEl = document.querySelector('.greeting');
+        if (greetingEl) greetingEl.textContent = t('greeting');
+
+        const projectsTrigger = document.getElementById('projects-trigger');
+        if (projectsTrigger) projectsTrigger.textContent = t('nav_projects');
+
+        // Project panel
+        const projectKicker = document.querySelector('.project-kicker');
+        if (projectKicker) projectKicker.textContent = t('project_kicker');
+
+        const projectTitleEl = document.getElementById('project-title');
+        if (projectTitleEl) projectTitleEl.textContent = t('project_title');
+
+        const projectDescEl = document.querySelector('.project-description');
+        if (projectDescEl) projectDescEl.textContent = t('project_description');
+
+        const projectFootnoteEl = document.querySelector('.project-footnote');
+        if (projectFootnoteEl) projectFootnoteEl.textContent = t('project_footnote');
+
+        const projectCloseEl = document.getElementById('project-close');
+        if (projectCloseEl) projectCloseEl.setAttribute('aria-label', t('close_proj_aria'));
+
+        // Token panel static elements
+        const tokenKicker = document.querySelector('.token-kicker');
+        if (tokenKicker) tokenKicker.textContent = t('token_kicker');
+
+        const tokenCloseEl = document.getElementById('token-close');
+        if (tokenCloseEl) tokenCloseEl.setAttribute('aria-label', t('close_tok_aria'));
+
+        // Private token label (label[for=private-token-input])
+        const privLabelEl = document.querySelector('label[for="private-token-input"]');
+        if (privLabelEl) privLabelEl.textContent = t('priv_token_label');
+
+        const privInputEl = document.getElementById('private-token-input');
+        if (privInputEl) privInputEl.placeholder = t('priv_token_ph');
+
+        // Device pass title
+        const devPassTitleEl = document.querySelector('.device-pass-title');
+        if (devPassTitleEl) devPassTitleEl.textContent = t('dev_pass_title');
+
+        // Device id section
+        const devIdLabelEl = document.querySelector('label[for="device-id-input"]');
+        if (devIdLabelEl) devIdLabelEl.textContent = t('dev_id_label');
+
+        const devIdDetailEl = document.querySelector('.device-id-detail');
+        if (devIdDetailEl) devIdDetailEl.textContent = t('dev_id_detail');
+
+        const privTokenDetailEl = document.querySelector('.private-token-detail');
+        if (privTokenDetailEl) privTokenDetailEl.textContent = t('priv_token_detail');
+
+        // Saved passkey button
+        if (savedPasskeyButton) savedPasskeyButton.textContent = t('passkey_btn');
+
+        // Re-apply current mode if token overlay is open, else set defaults
+        if (tokenOverlay && !tokenOverlay.hidden) {
+            const currentMode = tokenPanel?.getAttribute('data-mode') || 'token';
+            setTokenPromptMode(currentMode, state.activeRecord);
+        } else {
+            if (tokenTitle) tokenTitle.textContent = t('tok_title_token');
+            if (tokenDescription) tokenDescription.textContent = t('tok_desc_default');
+            if (tokenSubmit) tokenSubmit.textContent = t('tok_submit_token');
+            if (tokenCancel) tokenCancel.textContent = t('tok_cancel_token');
+            if (tokenNote) tokenNote.textContent = t('tok_note_token');
+            if (tokenLabel) tokenLabel.textContent = t('tok_label_token');
+            if (tokenInput) tokenInput.placeholder = t('tok_ph_token');
+        }
+
+        // Update owner risk dialog if visible
+        if (ownerRiskDialog && !ownerRiskDialog.hidden) {
+            const rPanel = ownerRiskDialog.querySelector('.owner-risk-panel');
+            if (rPanel) {
+                const titleEl = rPanel.querySelector('#owner-risk-title');
+                if (titleEl) titleEl.textContent = t('risk_title');
+                const dts = rPanel.querySelectorAll('dt');
+                const dds = rPanel.querySelectorAll('dd');
+                if (dts[0]) dts[0].textContent = t('ov_owner_code');
+                if (dts[1]) dts[1].textContent = t('risk_integrity');
+                if (dts[2]) dts[2].textContent = t('risk_risk');
+                if (dds[1]) dds[1].textContent = t('risk_integrity_v');
+                if (dds[2]) dds[2].textContent = t('risk_risk_v');
+                const msgEl = rPanel.querySelector('.owner-verification-message');
+                if (msgEl) msgEl.textContent = t('risk_msg');
+                const actionEl = rPanel.querySelector('.owner-risk-action');
+                if (actionEl) actionEl.textContent = t('risk_action');
+            }
+        }
+
+        // Re-render dynamic sections
+        configureDevicePassOption(state.activeBundlePayload);
+        configureSavedPasskeyOption(state.activeRecord);
+        if (overlay && !overlay.hidden) {
+            renderProjects();
+        }
+    }
+
+    function setupLangToggle() {
+        const langBtn = document.getElementById('lang-toggle');
+        if (!langBtn) return;
+
+        const langLabel = langBtn.querySelector('.lang-label');
+        if (langLabel) langLabel.textContent = currentLang === 'zh' ? 'EN' : 'ZH';
+
+        langBtn.addEventListener('click', () => {
+            currentLang = currentLang === 'zh' ? 'en' : 'zh';
+            applyLanguage();
+        });
+    }
+
     setupProjectOverlay();
     loadProjectManifest();
     runEntrance();
+    setupLangToggle();
+
+    // Apply saved language on load (after DOM elements are available)
+    if (currentLang !== 'en') {
+        applyLanguage();
+    }
 })();

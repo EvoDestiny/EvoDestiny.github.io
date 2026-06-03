@@ -55,7 +55,7 @@ html {
 body {
     min-height: 100vh;
     background: linear-gradient(165deg, var(--bg-start) 0%, var(--bg-mid) 35%, var(--bg-end) 100%);
-    font-family: 'Inter', sans-serif;
+    font-family: 'Inter', 'Noto Sans SC', sans-serif;
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -82,7 +82,7 @@ body.modal-open .container {
 }
 
 .greeting {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Playfair Display', 'Noto Serif SC', serif;
     font-size: clamp(2.6rem, 5.5vw, 4.2rem);
     font-weight: 700;
     color: var(--ink);
@@ -93,7 +93,7 @@ body.modal-open .container {
 }
 
 .name {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Playfair Display', 'Noto Serif SC', serif;
     font-style: italic;
     font-size: clamp(3rem, 7vw, 5.5rem);
     font-weight: 400;
@@ -191,12 +191,67 @@ body.modal-open .container {
     outline-offset: 4px;
 }
 
+.lang-toggle {
+    position: fixed;
+    top: 24px;
+    right: 28px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: none;
+    border: none;
+    padding: 0.2em 0.1em;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 320ms ease, color 180ms ease;
+}
+
+.lang-globe {
+    flex-shrink: 0;
+    display: block;
+}
+
+.lang-label {
+    line-height: 1;
+}
+
+.lang-toggle:hover {
+    color: var(--gold);
+}
+
+.lang-toggle:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 3px;
+}
+
+.lang-toggle:active {
+    transform: scale(0.95);
+}
+
+body.modal-open .lang-toggle {
+    opacity: 0.08 !important;
+    pointer-events: none;
+}
+
+@media (max-width: 640px) {
+    .lang-toggle {
+        top: 18px;
+        right: 20px;
+    }
+}
+
 .owner-code {
     position: fixed;
     top: 26px;
     left: 30px;
     z-index: 2;
-    font-family: 'Playfair Display', serif;
+    font-family: 'Playfair Display', 'Noto Serif SC', serif;
     font-style: italic;
     font-size: 0.88rem;
     font-weight: 400;
@@ -327,7 +382,7 @@ body.modal-open .owner-code {
     margin: 0 auto 0;
     width: var(--panel-copy-width);
     max-width: none;
-    font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', 'Times New Roman', serif;
     font-size: clamp(4rem, 9vw, 5.3rem);
     font-weight: 500;
     line-height: 0.93;
@@ -347,7 +402,7 @@ body.modal-open .owner-code {
     margin: 0.9rem auto 0;
     width: var(--panel-copy-width);
     max-width: none;
-    font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', 'Times New Roman', serif;
     font-size: clamp(1.15rem, 2.8vw, 1.4rem);
     font-weight: 500;
     line-height: 1.1;
@@ -482,7 +537,7 @@ body.modal-open .owner-code {
     min-width: 2.4rem;
     padding-right: 0.95rem;
     border-right: 1px solid var(--gold-border);
-    font-family: 'Cormorant Garamond', 'Hoefler Text', 'Times New Roman', serif;
+    font-family: 'Cormorant Garamond', 'Hoefler Text', 'Noto Serif SC', 'Times New Roman', serif;
     font-style: italic;
     font-weight: 500;
     font-size: 1.85rem;
@@ -520,7 +575,7 @@ body.modal-open .owner-code {
 }
 
 .project-record-label {
-    font-family: 'Cormorant Garamond', 'Hoefler Text', 'Times New Roman', serif;
+    font-family: 'Cormorant Garamond', 'Hoefler Text', 'Noto Serif SC', 'Times New Roman', serif;
     font-size: 1.45rem;
     font-weight: 500;
     line-height: 1.15;
@@ -542,7 +597,7 @@ body.modal-open .owner-code {
 .project-row-status {
     justify-self: end;
     align-self: center;
-    font-family: 'Cormorant Garamond', 'Hoefler Text', 'Times New Roman', serif;
+    font-family: 'Cormorant Garamond', 'Hoefler Text', 'Noto Serif SC', 'Times New Roman', serif;
     font-style: italic;
     font-size: 1rem;
     font-weight: 500;
@@ -694,7 +749,7 @@ body.modal-open .owner-code {
 
 .owner-verification-title {
     margin: 0 auto;
-    font-family: 'Cormorant Garamond', 'Hoefler Text', 'Times New Roman', serif;
+    font-family: 'Cormorant Garamond', 'Hoefler Text', 'Noto Serif SC', 'Times New Roman', serif;
     font-size: 1.35rem;
     font-weight: 500;
     font-style: italic;
