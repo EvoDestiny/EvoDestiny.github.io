@@ -4729,6 +4729,9 @@
         // Save preference
         try { localStorage.setItem('evo-lang', currentLang); } catch (e) {}
 
+        // Reflect the active language on <html> so language-scoped CSS (:lang) applies
+        document.documentElement.lang = currentLang;
+
         // Update lang toggle button label (show the other lang as the toggle target)
         const langBtn = document.getElementById('lang-toggle');
         if (langBtn) {

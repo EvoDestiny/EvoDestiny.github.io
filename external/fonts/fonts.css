@@ -496,6 +496,17 @@
 
 
 /* Noto Serif SC + Noto Sans SC — CJK subset (only characters used in zh translations) */
+/* Noto Sans SC Light (300) — subset to the tagline phrase characters only, so the
+   zh tagline can match the EN Inter 300 weight. If the zh tagline text changes,
+   regenerate this subset (Google Fonts css2 ?family=Noto+Sans+SC:wght@300&text=...). */
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url(zh-nsc-light-300.woff2) format('woff2');
+  unicode-range: U+3002, U+4e0e, U+4ee3, U+4f18, U+4f53, U+4f5c, U+521b, U+5320, U+53d1, U+5b57, U+5f00, U+5fc3, U+6253, U+6570, U+6d01, U+70ed, U+7231, U+7801, U+7b80, U+7cbe, U+8005, U+81f4, U+8ba1, U+8bbe, U+9020, U+96c5, U+9a8c;
+}
 @font-face {
   font-family: 'Noto Sans SC';
   font-style: normal;

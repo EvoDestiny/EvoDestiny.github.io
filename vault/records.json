@@ -21,6 +21,13 @@
       "state": "sealed",
       "bundle": "vault/bundles/task-03.vault.json",
       "publishedAt": "2026-05-29T21:40:24+08:00"
+    },
+    {
+      "id": "task-04",
+      "label": "Task 04",
+      "state": "sealed",
+      "bundle": "vault/bundles/task-04.vault.json",
+      "publishedAt": "2026-06-04T20:43:11+08:00"
     }
   ]
 }
