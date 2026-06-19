@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mirror Trae · 加密查看</title>
+<!-- Reuse the vault's look: same fonts + stylesheet, same token-prompt markup/classes. -->
+<link rel="stylesheet" href="/external/fonts/fonts.css">
+<link rel="stylesheet" href="/style.css">
+<style>
+  /* only the post-unlock full-screen viewer chrome is mirror-specific */
+  #mirror-bar { display: none; align-items: center; gap: .75rem; position: fixed; top: 0; left: 0; right: 0; height: 30px; z-index: 10; padding: 0 .9rem; background: rgba(16, 19, 24, .94); color: #cfd6e0; font: 12px/30px 'Inter', 'Noto Sans SC', sans-serif; }
+  #mirror-bar button { margin-left: auto; background: #2b333d; color: #e6e9ef; border: 0; border-radius: 6px; padding: 4px 12px; cursor: pointer; font: 12px 'Inter', sans-serif; }
+  #mirror-view { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: none; background: #fff; }
+  body.mirror-open { overflow: hidden; }
+  body.mirror-open #mirror-view { display: block; top: 30px; height: calc(100% - 30px); }
+  body.mirror-open #mirror-bar { display: flex; }
+  body.mirror-open .token-overlay { display: none; }
+
+  /* The mandatory notice: a single frosted reading sheet shown ON TOP of the already-loaded mirror.
+     The backdrop is blurred but translucent, so the trae page stays visible behind it. Not closable.
+     One clean sheet — no boxes nested inside boxes: the lead is a quiet line, the table is ruled with
+     hairlines only, and the action row fades into the page instead of sitting in its own panel. */
+  #notice-overlay { display: none; position: fixed; inset: 0; z-index: 30; align-items: center; justify-content: center; padding: clamp(1rem, 4vw, 3rem); background: rgba(14, 16, 21, .42); backdrop-filter: blur(8px) saturate(115%); -webkit-backdrop-filter: blur(8px) saturate(115%); }
+  body.notice-open #notice-overlay { display: flex; }
+  body.notice-open .token-overlay { display: none; }
+  .notice-card { --sheet: #fbfaf7; --rule: rgba(120, 110, 95, .18); display: flex; flex-direction: column; width: min(720px, 100%); max-height: 88vh; background: var(--sheet); color: var(--card-text); border-radius: 20px; box-shadow: 0 24px 70px rgba(20, 16, 8, .3), 0 2px 8px rgba(20, 16, 8, .12); overflow: hidden; animation: notice-in .42s cubic-bezier(.23, 1, .32, 1) both; }
+  @keyframes notice-in { from { opacity: 0; transform: translateY(16px) scale(.985); } to { opacity: 1; transform: none; } }
+  .notice-head { padding: clamp(1.7rem, 3vw, 2.3rem) clamp(1.6rem, 4vw, 2.7rem) 1rem; }
+  .notice-kicker { margin: 0 0 .55rem; font-size: .68rem; letter-spacing: .22em; text-transform: uppercase; color: var(--card-muted); }
+  .notice-title { margin: 0; font-size: clamp(1.35rem, 3vw, 1.75rem); font-weight: 600; letter-spacing: -.01em; }
+  .notice-scroll { flex: 1; overflow-y: auto; padding: .4rem clamp(1.6rem, 4vw, 2.7rem) 1.4rem; line-height: 1.78; font-size: .94rem; color: #3a3733; scrollbar-width: thin; scrollbar-color: rgba(120, 110, 95, .4) transparent; }
+  .notice-scroll::-webkit-scrollbar { width: 8px; }
+  .notice-scroll::-webkit-scrollbar-thumb { background: rgba(120, 110, 95, .3); border-radius: 8px; border: 2px solid var(--sheet); }
+  .notice-scroll p { margin: 0 0 .9rem; }
+  .notice-scroll ul, .notice-scroll ol { margin: 0 0 1rem; padding-left: 1.3rem; }
+  .notice-scroll li { margin: 0 0 .6rem; }
+  .notice-scroll li::marker { color: var(--card-muted); }
+  .notice-hint { margin: 0 0 1.4rem; color: var(--card-muted); font-size: .9rem; font-style: italic; }
+  .notice-h { margin: 2rem 0 .8rem; padding-top: 1.3rem; border-top: 1px solid var(--rule); font-size: 1.06rem; font-weight: 600; letter-spacing: -.005em; color: #211f1c; }
+  .notice-h:first-of-type { margin-top: .6rem; }
+  .notice-tablewrap { overflow-x: auto; margin: .2rem 0 1.2rem; }
+  .notice-table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+  .notice-table th, .notice-table td { padding: .6rem .75rem .6rem 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+  .notice-table thead th { color: var(--card-muted); font-weight: 600; border-bottom-width: 1.5px; }
+  .notice-table tbody th { font-weight: 600; color: #211f1c; white-space: nowrap; }
+  .notice-table tbody tr:last-child th, .notice-table tbody tr:last-child td { border-bottom: 0; }
+  .notice-end { margin: 1.8rem 0 0; padding-top: 1.1rem; border-top: 1px solid var(--rule); color: var(--card-muted); font-size: .85rem; }
+  .notice-foot { position: relative; display: flex; align-items: center; gap: 1rem; padding: 1rem clamp(1.6rem, 4vw, 2.7rem) clamp(1.3rem, 3vw, 1.6rem); background: var(--sheet); }
+  .notice-foot::before { content: ""; position: absolute; left: 0; right: 0; top: -34px; height: 34px; background: linear-gradient(to top, var(--sheet), rgba(251, 250, 247, 0)); pointer-events: none; }
+  .notice-status { flex: 1; margin: 0; font-size: .84rem; color: var(--card-muted); }
+  .notice-enter { flex-shrink: 0; background: var(--card-button); color: #fff; border: 0; border-radius: 11px; padding: .74rem 1.5rem; font: 600 .92rem 'Inter', 'Noto Sans SC', sans-serif; cursor: pointer; transition: opacity .25s, transform .2s, background .25s, box-shadow .25s; }
+  .notice-enter:not(:disabled) { box-shadow: 0 6px 18px rgba(23, 22, 21, .22); }
+  .notice-enter:hover:not(:disabled) { background: var(--card-button-hover); transform: translateY(-1px); }
+  .notice-enter:disabled { opacity: .4; cursor: not-allowed; }
+  .notice-enter:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+</style>
+</head>
+<body>
+  <div class="token-overlay is-open" id="token-overlay">
+    <section class="token-panel" role="dialog" aria-modal="true" aria-labelledby="token-title" tabindex="-1">
+      <button type="button" class="token-close" id="token-close" aria-label="Close">×</button>
+      <p class="token-kicker" id="token-kicker">Private Access</p>
+      <h2 class="token-title" id="token-title">Mirror Trae</h2>
+      <p class="token-description" id="token-description">A local mirror of trae.ai (coursework / technical demo). The content is encrypted and decrypted only in this browser's memory — closing the page clears it. Enter the access token to unlock.</p>
+      <div class="token-card">
+        <form class="token-form" id="token-form" novalidate>
+          <label class="private-token-label" id="token-label" for="token-input">Access token</label>
+          <div class="token-field">
+            <input class="token-input" id="token-input" name="token" type="password" inputmode="text" autocomplete="one-time-code" spellcheck="false" placeholder="Access token" required>
+          </div>
+          <p class="token-status" id="token-status" aria-live="polite"></p>
+          <button type="submit" class="token-submit" id="token-submit">Continue with token</button>
+          <p class="token-note" id="token-note">The access token is never stored; decryption happens entirely in this browser and the plaintext is never written to disk — it is cleared from memory when you close or lock. This page collects and uploads nothing.</p>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <div id="notice-overlay" aria-hidden="true">
+    <section class="notice-card" role="dialog" aria-modal="true" aria-labelledby="notice-title">
+      <div class="notice-head">
+        <p class="notice-kicker" id="notice-kicker">Before you continue</p>
+        <h2 class="notice-title" id="notice-title">Notice</h2>
+      </div>
+      <div class="notice-scroll" id="notice-scroll" tabindex="0"></div>
+      <div class="notice-foot">
+        <p class="notice-status" id="notice-status" aria-live="polite"></p>
+        <button type="button" class="notice-enter" id="notice-enter" disabled>Enter</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="mirror-bar"><span id="mirror-bar-text">Mirror Trae · unlocked in memory</span><button type="button" id="lock">Lock &amp; clear</button></div>
+  <iframe id="mirror-view" sandbox="allow-scripts allow-same-origin" title="Mirror Trae"></iframe>
+
+  <script src="/vendor/argon2-bundled.min.js"></script>
+  <script>
+  (function () {
+    "use strict";
+    var SCOPE = "/mirror-view";
+    var $ = function (id) { return document.getElementById(id); };
+    var SW = null, REG = null, busy = false;
+
+    // Follow the vault's chosen language. It's persisted same-origin under "evo-lang"; fall back to the
+    // browser language the same way main.js does, so the viewer matches the page that opened it.
+    var STR = {
+      en: {
+        kicker: "Private Access",
+        desc: "A local mirror of trae.ai (coursework / technical demo). The content is encrypted and decrypted only in this browser's memory — closing the page clears it. Enter the access token to unlock.",
+        label: "Access token", placeholder: "Access token",
+        submit: "Continue with token",
+        note: "The access token is never stored; decryption happens entirely in this browser and the plaintext is never written to disk — it is cleared from memory when you close or lock. This page collects and uploads nothing.",
+        close: "Close", bar: "Mirror Trae · unlocked in memory", lock: "Lock & clear",
+        need_token: "Please enter the access token", no_sw: "This browser does not support Service Workers, so the mirror cannot be viewed.",
+        no_argon: "The Argon2 runtime failed to load.", reading: "Reading the encrypted bundle…",
+        deriving: "Deriving the key (Argon2id, please wait)…", decrypting: "Decrypting…",
+        bad_token: "Wrong token, or the data is corrupted.", unzipping: "Decompressing…",
+        starting: "Starting the viewer…", err: "Error: ",
+        n_kicker: "Before you continue", n_title: "Mirror Trae · Project Notes",
+        n_enter: "I have read this — enter the mirror",
+        n_wait_both: "Please read the notice and scroll to the bottom ({0}s remaining).",
+        n_wait_time: "Please stay {0} more second(s).",
+        n_wait_scroll: "Please scroll to the bottom to continue.",
+        n_ready: "You may now enter."
+      },
+      zh: {
+        kicker: "私人访问",
+        desc: "trae.ai 的本地化镜像(课程作业 / 技术演示)。内容已加密,仅在本机浏览器内存中解密查看,关闭即清除。请输入访问令牌解锁。",
+        label: "访问令牌", placeholder: "访问令牌",
+        submit: "使用令牌继续",
+        note: "访问令牌不会被存储;解密在本机浏览器内完成,明文不写入磁盘,关闭或锁定即从内存清除。本页不收集、不上传任何信息。",
+        close: "关闭", bar: "Mirror Trae · 已在内存中解锁", lock: "锁定并清除",
+        need_token: "请输入访问令牌", no_sw: "此浏览器不支持 Service Worker,无法查看。",
+        no_argon: "Argon2 运行时未加载。", reading: "读取加密包…",
+        deriving: "派生密钥(Argon2id,稍候)…", decrypting: "解密…",
+        bad_token: "令牌错误,或数据已损坏。", unzipping: "解压…",
+        starting: "启动查看器…", err: "出错:",
+        n_kicker: "进入前请阅读", n_title: "Mirror Trae · 项目说明文档",
+        n_enter: "我已阅读,进入镜像",
+        n_wait_both: "请阅读说明并滚动到底部(还需 {0} 秒)。",
+        n_wait_time: "请再停留 {0} 秒。",
+        n_wait_scroll: "请滚动到底部以继续。",
+        n_ready: "现在可以进入了。"
+      }
+    };
+    var lang = (function () {
+      try {
+        var saved = localStorage.getItem("evo-lang");
+        if (saved === "zh" || saved === "en") return saved;
+        var b = ((navigator.languages && navigator.languages[0]) || navigator.language || "en").toLowerCase();
+        return b.indexOf("zh") === 0 ? "zh" : "en";
+      } catch (e) { return "en"; }
+    })();
+    var L = STR[lang] || STR.en;
+    function applyLang() {
+      document.documentElement.lang = lang;
+      $("token-kicker").textContent = L.kicker;
+      $("token-description").textContent = L.desc;
+      $("token-label").textContent = L.label;
+      $("token-input").placeholder = L.placeholder;
+      $("token-submit").textContent = L.submit;
+      $("token-note").textContent = L.note;
+      $("token-close").setAttribute("aria-label", L.close);
+      $("mirror-bar-text").textContent = L.bar;
+      $("lock").textContent = L.lock;
+      // notice chrome only — the document body ships ENCRYPTED in the bundle and is rendered post-decrypt
+      $("notice-kicker").textContent = L.n_kicker;
+      $("notice-title").textContent = L.n_title;
+      $("notice-enter").textContent = L.n_enter;
+      if (NOTICE) renderNotice();
+    }
+
+    // The notice document is decrypted from the token-sealed bundle (never plaintext in the repo). Render
+    // it into the scroll panel for the current language. Called after a successful unlock.
+    var NOTICE = null;
+    function renderNotice() {
+      var n = (NOTICE && (NOTICE[lang] || NOTICE.en)) || null;
+      var sc = $("notice-scroll");
+      sc.textContent = "";
+      if (!n) return;
+      if (n.intro) { var hint = document.createElement("p"); hint.className = "notice-hint"; hint.textContent = n.intro; sc.appendChild(hint); }
+      (n.doc || []).forEach(function (blk) {
+        if (blk.h) { var h = document.createElement("h3"); h.className = "notice-h"; h.textContent = blk.h; sc.appendChild(h); }
+        else if (blk.p) { var p = document.createElement("p"); p.textContent = blk.p; sc.appendChild(p); }
+        else if (blk.ul || blk.ol) {
+          var list = document.createElement(blk.ol ? "ol" : "ul");
+          (blk.ul || blk.ol).forEach(function (it) { var li = document.createElement("li"); li.textContent = it; list.appendChild(li); });
+          sc.appendChild(list);
+        } else if (blk.table) {
+          var wrap = document.createElement("div"); wrap.className = "notice-tablewrap";
+          var tbl = document.createElement("table"); tbl.className = "notice-table";
+          var thead = document.createElement("thead"), htr = document.createElement("tr");
+          blk.table.head.forEach(function (c) { var th = document.createElement("th"); th.textContent = c; htr.appendChild(th); });
+          thead.appendChild(htr); tbl.appendChild(thead);
+          var tbody = document.createElement("tbody");
+          blk.table.rows.forEach(function (r) { var tr = document.createElement("tr"); r.forEach(function (c, i) { var cell = document.createElement(i === 0 ? "th" : "td"); cell.textContent = c; tr.appendChild(cell); }); tbody.appendChild(tr); });
+          tbl.appendChild(tbody); wrap.appendChild(tbl); sc.appendChild(wrap);
+        }
+      });
+      if (n.end) { var end = document.createElement("p"); end.className = "notice-end"; end.textContent = n.end; sc.appendChild(end); }
+    }
+
+    function set(msg, tone) { var s = $("token-status"); s.textContent = msg || ""; if (tone) s.dataset.tone = tone; else delete s.dataset.tone; }
+    function b64ToBytes(b) { var s = atob(b), u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+    async function gunzip(u8) { var ds = new DecompressionStream("gzip"); var stream = new Blob([u8]).stream().pipeThrough(ds); return new Uint8Array(await new Response(stream).arrayBuffer()); }
+    function waitActive(reg) {
+      return new Promise(function (res) {
+        var sw = reg.installing || reg.waiting || reg.active;
+        if (sw && sw.state === "activated") return res(sw);
+        if (!sw) return setTimeout(function () { waitActive(reg).then(res); }, 120);
+        sw.addEventListener("statechange", function () { if (sw.state === "activated") res(sw); });
+      });
+    }
+    function handoff(sw, bundle) {
+      return new Promise(function (res, rej) {
+        var ch = new MessageChannel();
+        ch.port1.onmessage = function (e) { (e.data && e.data.ok) ? res() : rej(new Error((e.data && e.data.error) || "viewer load failed")); };
+        sw.postMessage({ type: "load", bundle: bundle }, [ch.port2]);
+      });
+    }
+
+    async function unlock() {
+      if (busy) return;
+      var token = $("token-input").value;
+      if (!token) { set(L.need_token, "error"); return; }
+      if (!("serviceWorker" in navigator)) { set(L.no_sw, "error"); return; }
+      if (typeof argon2 === "undefined" || !argon2.hash) { set(L.no_argon, "error"); return; }
+      busy = true; $("token-submit").disabled = true;
+      try {
+        set(L.reading);
+        var bundle = await (await fetch(SCOPE + "/mirror.bundle", { cache: "no-store" })).json();
+        set(L.deriving);
+        var r = await argon2.hash({ pass: token, salt: b64ToBytes(bundle.kdf.salt), time: bundle.kdf.passes, mem: bundle.kdf.memoryKiB, hashLen: bundle.kdf.tagLength, parallelism: bundle.kdf.parallelism, type: argon2.ArgonType.Argon2id });
+        set(L.decrypting);
+        var key = await crypto.subtle.importKey("raw", r.hash, "AES-GCM", false, ["decrypt"]);
+        var pt;
+        try {
+          pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64ToBytes(bundle.iv), additionalData: new TextEncoder().encode(bundle.aad) }, key, b64ToBytes(bundle.ct)));
+        } catch (e) { set(L.bad_token, "error"); busy = false; $("token-submit").disabled = false; return; }
+        set(L.unzipping);
+        var map = JSON.parse(new TextDecoder().decode(await gunzip(pt)));
+        // The notice ships INSIDE the encrypted bundle. Pull it out and strip it BEFORE the SW sees the
+        // map, so the worker only ever holds real mirror files; then render it for the current language.
+        NOTICE = map.__notice__ || null; delete map.__notice__;
+        renderNotice();
+        set(L.starting);
+        REG = await navigator.serviceWorker.register(SCOPE + "/sw.js", { scope: SCOPE + "/" });
+        SW = await waitActive(REG);
+        await handoff(SW, map);
+        map = null; pt.fill(0); if (r.hash && r.hash.fill) r.hash.fill(0);
+        $("token-input").value = "";
+        set("");
+        startHeartbeat();                            // keep the in-memory SW alive across the notice dwell
+        document.body.classList.add("mirror-open");  // reveal the trae mirror first…
+        $("mirror-view").src = SCOPE + "/";
+        showNotice();                                // …then overlay the mandatory, non-closable notice
+      } catch (e) {
+        set(L.err + (e && e.message || e), "error");
+        busy = false; $("token-submit").disabled = false;
+      }
+    }
+
+    // Mandatory notice gate: the Enter button only unlocks once the reader has BOTH stayed >= 30s AND
+    // scrolled to the bottom of the notice. Neither alone is enough; it can't be skipped.
+    var DWELL = 30, remain = DWELL, timeOk = false, scrollOk = false, noticeTimer = null;
+    function nFmt(s, n) { return s.replace("{0}", n); }
+    function renderGate() {
+      var btn = $("notice-enter");
+      if (timeOk && scrollOk) { btn.disabled = false; set2(L.n_ready); return; }
+      btn.disabled = true;
+      if (!timeOk && !scrollOk) set2(nFmt(L.n_wait_both, remain));
+      else if (!timeOk) set2(nFmt(L.n_wait_time, remain));
+      else set2(L.n_wait_scroll);
+    }
+    function set2(msg) { $("notice-status").textContent = msg || ""; }
+    function checkScroll() {
+      var sc = $("notice-scroll");
+      if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4) scrollOk = true;
+      renderGate();
+    }
+    function showNotice() {
+      document.body.classList.add("notice-open");
+      remain = DWELL; timeOk = false; scrollOk = false;
+      var sc = $("notice-scroll");
+      sc.scrollTop = 0;
+      // if the notice is short enough that there's nothing to scroll, treat it as already read-through
+      if (sc.scrollHeight <= sc.clientHeight + 4) scrollOk = true;
+      sc.addEventListener("scroll", checkScroll);
+      renderGate();
+      sc.focus();
+      noticeTimer = setInterval(function () {
+        remain -= 1;
+        if (remain <= 0) { remain = 0; timeOk = true; clearInterval(noticeTimer); noticeTimer = null; }
+        renderGate();
+      }, 1000);
+    }
+    function enterMirror() {
+      // The mirror is already loaded underneath; entering just lifts the non-closable notice off it.
+      if (!(timeOk && scrollOk)) return;
+      if (noticeTimer) { clearInterval(noticeTimer); noticeTimer = null; }
+      document.body.classList.remove("notice-open");
+    }
+
+    // Heartbeat: a periodic message keeps the Service Worker from being idle-evicted (which would wipe the
+    // in-memory file map) while the reader sits on the notice — or anywhere in the mirror.
+    var hb = null;
+    function startHeartbeat() { stopHeartbeat(); hb = setInterval(function () { try { var sw = (REG && REG.active) || SW; sw && sw.postMessage({ type: "ping" }); } catch (e) {} }, 12000); }
+    function stopHeartbeat() { if (hb) { clearInterval(hb); hb = null; } }
+
+    function lock() { stopHeartbeat(); try { SW && SW.postMessage({ type: "purge" }); } catch (e) {} location.reload(); }
+
+    // The whole page is the unlock overlay (nothing renders behind it), so "close" means leaving the
+    // viewer and going back to the vault — back if we came from there, otherwise straight to the index.
+    function closeViewer() {
+      if (document.referrer && history.length > 1) history.back();
+      else location.assign("index.html");
+    }
+
+    applyLang();
+    $("token-form").addEventListener("submit", function (e) { e.preventDefault(); unlock(); });
+    $("lock").addEventListener("click", lock);
+    $("notice-enter").addEventListener("click", enterMirror);
+    $("token-close").addEventListener("click", closeViewer);
+    addEventListener("keydown", function (e) { if (e.key === "Escape" && !document.body.classList.contains("mirror-open") && !document.body.classList.contains("notice-open")) closeViewer(); });
+    addEventListener("pagehide", function () { stopHeartbeat(); try { SW && SW.postMessage({ type: "purge" }); } catch (e) {} });
+    $("token-input").focus();
+  })();
+  </script>
+</body>
+</html>

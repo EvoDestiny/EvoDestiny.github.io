@@ -4360,6 +4360,15 @@
         const record = state.projects.find(project => project.id === recordId);
         if (!record) return;
 
+        // Dedicated viewers (e.g. Mirror Trae) ship their own token-only encrypted pipeline
+        // (Service Worker + sandboxed iframe) and are NOT vault bundles — they cannot use the
+        // blob viewer. A record carrying a `viewer` path just navigates to that page, which runs
+        // its own token unlock. Task-01..04 have no `viewer` field and keep the normal flow.
+        if (record.viewer) {
+            window.location.assign(record.viewer);
+            return;
+        }
+
         const passkeyTicket = getSavedPasskeyTicket(record);
         const fallbackTicket = getSavedLocalFallbackTicket(record);
         const hasSessionAccess = state.sessionVaultKeys.has(record.id);

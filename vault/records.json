@@ -28,6 +28,13 @@
       "state": "sealed",
       "bundle": "vault/bundles/task-04.vault.json",
       "publishedAt": "2026-06-04T20:43:11+08:00"
+    },
+    {
+      "id": "mirror-trae",
+      "label": "Mirror Trae",
+      "state": "sealed",
+      "viewer": "mirror-view.html",
+      "publishedAt": "2026-06-13T12:00:00+08:00"
     }
   ]
 }
