@@ -35,6 +35,16 @@
       "state": "sealed",
       "viewer": "mirror-view.html",
       "publishedAt": "2026-06-13T12:00:00+08:00"
+    },
+    {
+      "id": "destiny",
+      "label": "Destiny",
+      "state": "open",
+      "publicArchive": "vault/bundles/destiny.public.zip",
+      "entry": "index.html",
+      "notice": "README.md",
+      "noticeTitle": "Destiny · 项目说明文档",
+      "publishedAt": "2026-06-13T11:59:00+08:00"
     }
   ]
 }

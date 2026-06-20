@@ -18,11 +18,11 @@
             pl_empty: 'No sealed records are published yet',
             pl_saved_meta: 'Saved device access is available in this browser',
             pl_sealed_meta: 'Access token required to unlock locally',
-            pl_open_meta: 'Published archive',
+            pl_open_meta: 'Unencrypted public archive',
             pl_show_more: 'Show more',
             pl_show_less: 'Show less',
             st_sealed: 'sealed',
-            st_open: 'open',
+            st_open: 'unlocked',
             st_device_pass: 'device pass',
             st_loading: 'loading',
             st_offline: 'offline',
@@ -134,11 +134,11 @@
             pl_empty: '暂无已发布的封存记录',
             pl_saved_meta: '此浏览器已保存设备访问',
             pl_sealed_meta: '需要访问令牌以在本地解锁',
-            pl_open_meta: '已发布档案',
+            pl_open_meta: '未加密公开压缩包',
             pl_show_more: '显示更多',
             pl_show_less: '收起',
             st_sealed: '已封存',
-            st_open: '已开放',
+            st_open: '未上锁',
             st_device_pass: '设备通行证',
             st_loading: '加载中',
             st_offline: '离线',
@@ -1483,9 +1483,397 @@
         return URL.createObjectURL(new Blob([viewerHtml], { type: 'text/html; charset=utf-8' }));
     }
 
-    function writeViewerPlaceholder(viewerWindow, label) {
+    function markdownToNoticeHtml(markdown, skipTitle = '') {
+        const lines = String(markdown || '').replace(/\r\n?/g, '\n').split('\n');
+        const html = [];
+        let listType = '';
+        let tableRows = [];
+        let skippedTitle = false;
+        let seenHeading = false;
+        let emittedIntro = false;
+
+        const closeList = () => {
+            if (!listType) return;
+            html.push(`</${listType}>`);
+            listType = '';
+        };
+        const flushTable = () => {
+            if (!tableRows.length) return;
+
+            const [head, ...bodyRows] = tableRows;
+            html.push('<div class="evo-notice-tablewrap"><table class="evo-notice-table">');
+            if (head) {
+                html.push('<thead><tr>');
+                head.forEach(cell => {
+                    html.push(`<th scope="col">${cell}</th>`);
+                });
+                html.push('</tr></thead>');
+            }
+
+            html.push('<tbody>');
+            bodyRows.forEach(row => {
+                html.push('<tr>');
+                row.forEach((cell, index) => {
+                    html.push(index === 0 ? `<th scope="row">${cell}</th>` : `<td>${cell}</td>`);
+                });
+                html.push('</tr>');
+            });
+            html.push('</tbody></table></div>');
+            tableRows = [];
+        };
+        const normalizeInlineText = value => String(value || '')
+            .replace(/[`*_]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const normalizedSkipTitle = normalizeInlineText(skipTitle);
+        const inline = value => escapeHtml(value)
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        const isTableSeparator = line => /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line);
+        const parseTableRow = line => line
+            .replace(/^\s*\|/, '')
+            .replace(/\|\s*$/, '')
+            .split('|')
+            .map(cell => inline(cell.trim()));
+
+        lines.forEach(rawLine => {
+            const line = rawLine.trim();
+
+            if (!line) {
+                closeList();
+                flushTable();
+                return;
+            }
+
+            if (/^-{3,}$/.test(line)) {
+                closeList();
+                flushTable();
+                return;
+            }
+
+            if (line.includes('|') && !isTableSeparator(line)) {
+                closeList();
+                tableRows.push(parseTableRow(line));
+                return;
+            }
+
+            if (isTableSeparator(line)) {
+                return;
+            }
+
+            flushTable();
+
+            const heading = line.match(/^(#{1,4})\s+(.+)$/);
+            if (heading) {
+                closeList();
+                if (!skippedTitle && normalizedSkipTitle && normalizeInlineText(heading[2]) === normalizedSkipTitle) {
+                    skippedTitle = true;
+                    return;
+                }
+
+                seenHeading = true;
+                html.push(`<h3 class="evo-notice-h">${inline(heading[2])}</h3>`);
+                return;
+            }
+
+            const unordered = line.match(/^[-*]\s+(.+)$/);
+            if (unordered) {
+                if (listType !== 'ul') {
+                    closeList();
+                    html.push('<ul>');
+                    listType = 'ul';
+                }
+                html.push(`<li>${inline(unordered[1])}</li>`);
+                return;
+            }
+
+            const ordered = line.match(/^\d+\.\s+(.+)$/);
+            if (ordered) {
+                if (listType !== 'ol') {
+                    closeList();
+                    html.push('<ol>');
+                    listType = 'ol';
+                }
+                html.push(`<li>${inline(ordered[1])}</li>`);
+                return;
+            }
+
+            closeList();
+            const introClass = !seenHeading && !emittedIntro ? ' class="evo-notice-hint"' : '';
+            if (!seenHeading && !emittedIntro) emittedIntro = true;
+            html.push(`<p${introClass}>${inline(line)}</p>`);
+        });
+
+        closeList();
+        flushTable();
+        return html.join('');
+    }
+
+    function buildPublicNotice(record, fileMap) {
+        if (!record?.notice) return '';
+
+        const noticePath = normalizeBundlePath(record.notice);
+        const noticeBytes = fileMap.get(noticePath);
+        if (!noticeBytes) return '';
+
+        const title = record.noticeTitle || `${record.label || 'Project'} notes`;
+        return `
+            <div class="evo-public-notice" id="evo-public-notice" role="dialog" aria-modal="true" aria-labelledby="evo-public-notice-title">
+                <section class="evo-notice-card">
+                    <div class="evo-notice-head">
+                        <p class="evo-notice-kicker">${currentLang === 'zh' ? '进入前请阅读' : 'Before you continue'}</p>
+                        <h1 class="evo-notice-title" id="evo-public-notice-title">${escapeHtml(title)}</h1>
+                    </div>
+                    <div class="evo-notice-scroll" id="evo-notice-scroll" tabindex="0">
+                        ${markdownToNoticeHtml(textDecoder.decode(noticeBytes), title)}
+                    </div>
+                    <div class="evo-notice-foot">
+                        <p class="evo-notice-status" id="evo-notice-status" aria-live="polite"></p>
+                        <button type="button" class="evo-notice-enter" id="evo-notice-enter" disabled>${currentLang === 'zh' ? '我已阅读，进入' : 'I have read this'}</button>
+                    </div>
+                </section>
+            </div>`;
+    }
+
+    function buildPublicArchiveViewerUrl(record, fileMap) {
+        const entryPath = normalizeBundlePath(record.entry || 'index.html');
+        if (!fileMap.has(entryPath)) {
+            throw new Error('Entry document missing from public archive.');
+        }
+
+        const htmlPaths = [...fileMap.keys()].filter(filePath => getMimeType(filePath).startsWith('text/html'));
+        const htmlPathSet = new Set(htmlPaths);
+        const assetUrls = [];
+        const urlCache = new Map();
+
+        function createTrackedUrl(blob) {
+            const url = URL.createObjectURL(blob);
+            assetUrls.push(url);
+            return url;
+        }
+
+        function createResourceUrl(filePath) {
+            const normalizedPath = normalizeBundlePath(filePath);
+
+            if (urlCache.has(normalizedPath)) {
+                return urlCache.get(normalizedPath);
+            }
+
+            const bytes = fileMap.get(normalizedPath);
+            if (!bytes || normalizedPath === vaultMetaFile || htmlPathSet.has(normalizedPath)) {
+                return null;
+            }
+
+            let payload = bytes;
+            const mimeType = getMimeType(normalizedPath);
+
+            if (mimeType.startsWith('text/css')) {
+                const rewrittenCss = rewriteCssUrls(textDecoder.decode(bytes), normalizedPath, createResourceUrl);
+                payload = textEncoder.encode(rewrittenCss);
+            }
+
+            const resourceUrl = createTrackedUrl(new Blob([payload], { type: mimeType }));
+            urlCache.set(normalizedPath, resourceUrl);
+            return resourceUrl;
+        }
+
+        function rewritePublicLinks(doc, currentPath) {
+            doc.querySelectorAll('a[href]').forEach(anchor => {
+                const href = anchor.getAttribute('href') || '';
+                const resolved = resolveBundleReference(currentPath, href);
+                if (!resolved || !htmlPathSet.has(resolved)) return;
+
+                anchor.href = `#${resolved}`;
+                anchor.dataset.evoPublicPath = resolved;
+            });
+        }
+
+        function buildPublicPageHtml(pagePath) {
+            const bytes = fileMap.get(pagePath);
+            const doc = new DOMParser().parseFromString(textDecoder.decode(bytes), 'text/html');
+            rewriteDocumentResources(doc, pagePath, createResourceUrl);
+            rewritePublicLinks(doc, pagePath);
+
+            const navScript = doc.createElement('script');
+            navScript.textContent = `(function () {
+    document.addEventListener('click', function (event) {
+        var anchor = event.target && event.target.closest ? event.target.closest('a[data-evo-public-path]') : null;
+        if (!anchor) return;
+        event.preventDefault();
+        parent.postMessage({ type: 'evo-public-nav', path: anchor.getAttribute('data-evo-public-path') }, '*');
+    });
+})();`;
+            doc.body.appendChild(navScript);
+            return `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
+        }
+
+        const pages = {};
+        htmlPaths.forEach(pagePath => {
+            pages[pagePath] = buildPublicPageHtml(pagePath);
+        });
+
+        const pagesJson = JSON.stringify(pages).replace(/</g, '\\u003c');
+        const assetUrlsJson = JSON.stringify(assetUrls).replace(/</g, '\\u003c');
+        const initialPathJson = JSON.stringify(entryPath);
+        const label = escapeHtml(record.label || 'Public archive');
+        const noticeMarkup = buildPublicNotice(record, fileMap);
+        const waitBoth = currentLang === 'zh'
+            ? '请阅读说明并滚动到底部（还需 {0} 秒）。'
+            : 'Please read the notice and scroll to the bottom ({0}s remaining).';
+        const waitTime = currentLang === 'zh'
+            ? '请再停留 {0} 秒。'
+            : 'Please stay {0} more second(s).';
+        const waitScroll = currentLang === 'zh'
+            ? '请滚动到底部以继续。'
+            : 'Please scroll to the bottom to continue.';
+        const ready = currentLang === 'zh' ? '现在可以进入。' : 'You may now enter.';
+
+        const shell = `<!doctype html>
+<html lang="${currentLang === 'zh' ? 'zh-CN' : 'en'}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${label}</title>
+<style>
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #f4f2ec; }
+#evo-public-frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+.evo-public-notice { position: fixed; inset: 0; z-index: 2147483647; display: flex; align-items: center; justify-content: center; padding: clamp(1rem, 4vw, 3rem); box-sizing: border-box; background: rgba(14, 16, 21, .42); backdrop-filter: blur(8px) saturate(115%); -webkit-backdrop-filter: blur(8px) saturate(115%); font-family: Inter, "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #211f1a; }
+.evo-notice-card { --sheet: #fbfaf7; --rule: rgba(120, 110, 95, .18); --card-text: #211f1a; --card-muted: #6f6a63; --card-button: #171615; --card-button-hover: #30343a; --focus-ring: #8d7447; display: flex; flex-direction: column; width: min(720px, 100%); max-height: 88vh; background: var(--sheet); color: var(--card-text); border-radius: 20px; box-shadow: 0 24px 70px rgba(20, 16, 8, .3), 0 2px 8px rgba(20, 16, 8, .12); overflow: hidden; animation: evo-notice-in .42s cubic-bezier(.23, 1, .32, 1) both; }
+@keyframes evo-notice-in { from { opacity: 0; transform: translateY(16px) scale(.985); } to { opacity: 1; transform: none; } }
+.evo-notice-head { padding: clamp(1.7rem, 3vw, 2.3rem) clamp(1.6rem, 4vw, 2.7rem) 1rem; }
+.evo-notice-kicker { margin: 0 0 .55rem; font-size: .68rem; letter-spacing: .22em; text-transform: uppercase; color: var(--card-muted); }
+.evo-notice-title { margin: 0; font-size: clamp(1.35rem, 3vw, 1.75rem); font-weight: 600; letter-spacing: 0; line-height: 1.2; }
+.evo-notice-scroll { flex: 1; overflow-y: auto; padding: .4rem clamp(1.6rem, 4vw, 2.7rem) 1.4rem; line-height: 1.78; font-size: .94rem; color: #3a3733; scrollbar-width: thin; scrollbar-color: rgba(120, 110, 95, .4) transparent; }
+.evo-notice-scroll::-webkit-scrollbar { width: 8px; }
+.evo-notice-scroll::-webkit-scrollbar-thumb { background: rgba(120, 110, 95, .3); border-radius: 8px; border: 2px solid var(--sheet); }
+.evo-notice-scroll p { margin: 0 0 .9rem; }
+.evo-notice-scroll ul, .evo-notice-scroll ol { margin: 0 0 1rem; padding-left: 1.3rem; }
+.evo-notice-scroll li { margin: 0 0 .6rem; }
+.evo-notice-scroll li::marker { color: var(--card-muted); }
+.evo-notice-hint { margin: 0 0 1.4rem; color: var(--card-muted); font-size: .9rem; font-style: italic; }
+.evo-notice-h { margin: 2rem 0 .8rem; padding-top: 1.3rem; border-top: 1px solid var(--rule); font-size: 1.06rem; font-weight: 600; letter-spacing: 0; color: #211f1c; line-height: 1.35; }
+.evo-notice-h:first-of-type { margin-top: .6rem; }
+.evo-notice-scroll code { padding: .08rem .28rem; border-radius: 5px; background: rgba(33, 31, 26, .07); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9em; }
+.evo-notice-tablewrap { overflow-x: auto; margin: .2rem 0 1.2rem; }
+.evo-notice-table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+.evo-notice-table th, .evo-notice-table td { padding: .6rem .75rem .6rem 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+.evo-notice-table thead th { color: var(--card-muted); font-weight: 600; border-bottom-width: 1.5px; }
+.evo-notice-table tbody th { font-weight: 600; color: #211f1c; white-space: nowrap; }
+.evo-notice-table tbody tr:last-child th, .evo-notice-table tbody tr:last-child td { border-bottom: 0; }
+.evo-notice-foot { position: relative; display: flex; align-items: center; gap: 1rem; padding: 1rem clamp(1.6rem, 4vw, 2.7rem) clamp(1.3rem, 3vw, 1.6rem); background: var(--sheet); }
+.evo-notice-foot::before { content: ""; position: absolute; left: 0; right: 0; top: -34px; height: 34px; background: linear-gradient(to top, var(--sheet), rgba(251, 250, 247, 0)); pointer-events: none; }
+.evo-notice-status { flex: 1; margin: 0; font-size: .84rem; color: var(--card-muted); line-height: 1.45; }
+.evo-notice-enter { flex-shrink: 0; background: var(--card-button); color: #fff; border: 0; border-radius: 11px; padding: .74rem 1.5rem; font: 600 .92rem Inter, "Noto Sans SC", sans-serif; cursor: pointer; transition: opacity .25s, transform .2s, background .25s, box-shadow .25s; }
+.evo-notice-enter:not(:disabled) { box-shadow: 0 6px 18px rgba(23, 22, 21, .22); }
+.evo-notice-enter:hover:not(:disabled) { background: var(--card-button-hover); transform: translateY(-1px); }
+.evo-notice-enter:disabled { opacity: .4; cursor: not-allowed; }
+.evo-notice-enter:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+@media (max-width: 640px) { .evo-public-notice { padding: .85rem; } .evo-notice-foot { display: grid; } .evo-notice-enter { width: 100%; } }
+</style>
+</head>
+<body>
+<iframe id="evo-public-frame" title="${label}"></iframe>
+${noticeMarkup}
+<script type="application/json" id="evo-public-pages">${pagesJson}</script>
+<script>
+(function () {
+    var pages = JSON.parse(document.getElementById('evo-public-pages').textContent);
+    var initialPath = ${initialPathJson};
+    var frame = document.getElementById('evo-public-frame');
+    function showPage(path, push) {
+        var next = pages[path] ? path : initialPath;
+        frame.srcdoc = pages[next];
+        if (push) history.pushState({ path: next }, '', '#' + encodeURIComponent(next));
+    }
+    addEventListener('message', function (event) {
+        if (!event.data || event.data.type !== 'evo-public-nav') return;
+        showPage(event.data.path, true);
+    });
+    addEventListener('popstate', function (event) {
+        showPage((event.state && event.state.path) || initialPath, false);
+    });
+    showPage(initialPath, false);
+
+    var notice = document.getElementById('evo-public-notice');
+    if (notice) {
+        var dwell = 30, remain = dwell, timeOk = false, scrollOk = false;
+        var scroll = document.getElementById('evo-notice-scroll');
+        var status = document.getElementById('evo-notice-status');
+        var enter = document.getElementById('evo-notice-enter');
+        function fmt(text, value) { return text.replace('{0}', value); }
+        function renderGate() {
+            if (timeOk && scrollOk) {
+                enter.disabled = false;
+                status.textContent = ${JSON.stringify(ready)};
+            } else {
+                enter.disabled = true;
+                status.textContent = !timeOk && !scrollOk
+                    ? fmt(${JSON.stringify(waitBoth)}, remain)
+                    : !timeOk ? fmt(${JSON.stringify(waitTime)}, remain) : ${JSON.stringify(waitScroll)};
+            }
+        }
+        function checkScroll() {
+            if (scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 4) scrollOk = true;
+            renderGate();
+        }
+        scroll.addEventListener('scroll', checkScroll, { passive: true });
+        if (scroll.scrollHeight <= scroll.clientHeight + 4) scrollOk = true;
+        renderGate();
+        setTimeout(function () { try { scroll.focus({ preventScroll: true }); } catch (error) { scroll.focus(); } }, 80);
+        var timer = setInterval(function () {
+            remain -= 1;
+            if (remain <= 0) {
+                remain = 0;
+                timeOk = true;
+                clearInterval(timer);
+            }
+            renderGate();
+        }, 1000);
+        enter.addEventListener('click', function () {
+            if (!(timeOk && scrollOk)) return;
+            clearInterval(timer);
+            notice.remove();
+            frame.focus();
+        });
+        addEventListener('keydown', function (event) {
+            if (document.getElementById('evo-public-notice') && event.key === 'Escape') {
+                event.preventDefault();
+            }
+        });
+    }
+
+    addEventListener('pagehide', function () {
+        var urls = ${assetUrlsJson};
+        urls.forEach(function (url) {
+            try { URL.revokeObjectURL(url); } catch (error) {}
+        });
+    });
+})();
+</script>
+</body>
+</html>`;
+
+        return URL.createObjectURL(new Blob([shell], { type: 'text/html; charset=utf-8' }));
+    }
+
+    function writeViewerPlaceholder(viewerWindow, label, options = {}) {
+        const isPublicArchive = Boolean(options.publicArchive);
         const escapedLabel = escapeHtml(label);
         const localFontsHref = escapeHtml(new URL('external/fonts/fonts.css', window.location.href).href);
+        const title = isPublicArchive ? `Opening ${escapedLabel}` : `Unlocking ${escapedLabel}`;
+        const description = isPublicArchive
+            ? (currentLang === 'zh'
+                ? '此记录未上锁，正在解开公开压缩包并准备查看。'
+                : 'This record is not locked. The public archive is being unpacked for viewing.')
+            : 'Your archive is being decrypted locally and prepared in a new browser tab.';
+        const badge = isPublicArchive
+            ? (currentLang === 'zh' ? '未上锁，正在解包' : 'Unlocked archive')
+            : 'Opening archive';
+        const note = isPublicArchive
+            ? (currentLang === 'zh'
+                ? '请稍候，浏览器会直接解压公开 zip 并从本次会话打开。'
+                : 'Please wait while the public zip is unpacked and loaded from this browser session.')
+            : 'Please wait while the sealed bundle is unpacked and loaded from this browser session.';
 
         viewerWindow.document.open();
         viewerWindow.document.write(`<!DOCTYPE html>
@@ -1493,7 +1881,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unlocking ${escapedLabel}</title>
+    <title>${title}</title>
     <link rel="stylesheet" href="${localFontsHref}">
     <style>
         :root {
@@ -1590,11 +1978,11 @@
 <body>
     <main>
         <h1>${escapedLabel}</h1>
-        <p class="description">Your archive is being decrypted locally and prepared in a new browser tab.</p>
+        <p class="description">${description}</p>
         <section class="card" aria-label="Archive status">
             <div class="status">
-                <div class="status-badge">Opening archive</div>
-                <p class="status-note">Please wait while the sealed bundle is unpacked and loaded from this browser session.</p>
+                <div class="status-badge">${badge}</div>
+                <p class="status-note">${note}</p>
             </div>
         </section>
     </main>
@@ -1638,6 +2026,57 @@
         } catch (error) {
             state.bundleCache.delete(record.id);
             throw error;
+        }
+    }
+
+    async function fetchPublicArchive(record) {
+        if (state.bundleCache.has(record.id)) {
+            return state.bundleCache.get(record.id);
+        }
+
+        const archiveUrl = record.publicArchive;
+        if (!archiveUrl) {
+            throw new Error('Public archive is unavailable.');
+        }
+
+        const pending = fetch(archiveUrl, { cache: 'no-store' })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Public archive is unavailable.');
+                }
+
+                return response.arrayBuffer();
+            })
+            .then(buffer => unpackArchive(new Uint8Array(buffer)));
+
+        state.bundleCache.set(record.id, pending);
+
+        try {
+            return await pending;
+        } catch (error) {
+            state.bundleCache.delete(record.id);
+            throw error;
+        }
+    }
+
+    async function openPublicArchive(record) {
+        const viewerWindow = openViewerWindow();
+        if (!viewerWindow) {
+            window.alert(t('msg_popup'));
+            return;
+        }
+
+        writeViewerPlaceholder(viewerWindow, record.label, { publicArchive: true });
+
+        try {
+            const fileMap = await fetchPublicArchive(record);
+            const viewerUrl = buildPublicArchiveViewerUrl(record, fileMap);
+            viewerWindow.location.replace(viewerUrl);
+            closeProjects({ restorePageFocus: false });
+        } catch (error) {
+            viewerWindow.close();
+            console.warn('Public archive failed:', error);
+            window.alert(error instanceof Error ? error.message : t('msg_unable'));
         }
     }
 
@@ -4366,6 +4805,11 @@
         // its own token unlock. Task-01..04 have no `viewer` field and keep the normal flow.
         if (record.viewer) {
             window.location.assign(record.viewer);
+            return;
+        }
+
+        if (record.publicArchive) {
+            await openPublicArchive(record);
             return;
         }
 
