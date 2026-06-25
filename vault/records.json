@@ -19,6 +19,14 @@
       "publishedAt": "2026-06-13T12:00:00+08:00"
     },
     {
+      "id": "task-05",
+      "label": "Task 05",
+      "state": "open",
+      "publicArchive": "vault/bundles/task-05.public.zip",
+      "entry": "index.html",
+      "publishedAt": "2026-06-13T11:58:00+08:00"
+    },
+    {
       "id": "task-01",
       "label": "Task 01",
       "state": "sealed",
